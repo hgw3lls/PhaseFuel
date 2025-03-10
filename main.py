@@ -5,6 +5,9 @@ import openai
 import os
 import base64
 import json
+import hypercorn.asyncio
+import asyncio
+from hypercorn.config import Config
 
 # Decode the FIREBASE_CREDENTIALS environment variable
 firebase_creds = os.getenv("FIREBASE_CREDENTIALS")
@@ -57,3 +60,7 @@ def get_meal_plan(user_id: str):
     else:
         raise HTTPException(status_code=404, detail="Meal plan not found")
 
+if __name__ == "__main__":
+    config = Config()
+    config.bind = ["0.0.0.0:8000"]  # Adjust to Railway's dynamic port if needed
+    asyncio.run(hypercorn.asyncio.serve(app, config))
