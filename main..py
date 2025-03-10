@@ -1,11 +1,21 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from firebase_admin import credentials, firestore, initialize_app
 import openai
 import os
+import base64
+import json
+
+# Decode the FIREBASE_CREDENTIALS environment variable
+firebase_creds = os.getenv("FIREBASE_CREDENTIALS")
+if not firebase_creds:
+    raise ValueError("Missing FIREBASE_CREDENTIALS environment variable")
+
+decoded_creds = base64.b64decode(firebase_creds).decode("utf-8")
+firebase_config = json.loads(decoded_creds)
 
 # Initialize Firebase
-cred = credentials.Certificate("firebase_credentials.json")  # Replace with actual file
+cred = credentials.Certificate(firebase_config)
 initialize_app(cred)
 db = firestore.client()
 
@@ -46,3 +56,4 @@ def get_meal_plan(user_id: str):
         return meal_ref.to_dict()
     else:
         raise HTTPException(status_code=404, detail="Meal plan not found")
+
