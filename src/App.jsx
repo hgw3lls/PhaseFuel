@@ -188,7 +188,9 @@ export default function App() {
   const [userId, setUserId] = useState("");
   const [cycleDay, setCycleDay] = useState("");
   const [symptoms, setSymptoms] = useState("");
-  const [pantryItems, setPantryItems] = useState(() => loadPantry());
+  const [pantryItems, setPantryItems] = useState(() =>
+    typeof loadPantry === "function" ? loadPantry() : []
+  );
   const [freezerItems, setFreezerItems] = useState(() => loadFreezer());
   const [priceItems, setPriceItems] = useState(() => loadPrices());
   const [historyItems, setHistoryItems] = useState(() => loadHistory());
