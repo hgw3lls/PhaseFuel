@@ -1,27 +1,20 @@
 # PhaseFuel
 
-PhaseFuel started as a backend service for generating cycle-aware meal plans. This repo now also includes a Vite + React brutalist web app that runs entirely in the browser so it can be deployed on GitHub Pages.
+PhaseFuel started as a backend service for generating cycle-aware meal plans. This repo now also includes a static web app that runs entirely in the browser so it can be deployed on GitHub Pages.
 
-## Web App (Vite + React)
+## Web App (GitHub Pages)
 
-The web app uses the OpenAI API directly from the browser. Plans are saved locally in `localStorage` by user ID.
+The static web app lives in the `docs/` folder and uses the OpenAI API directly from the browser. Plans are saved locally in `localStorage` by user ID.
 
 ### Run locally
 
 ```bash
-npm install
-npm run dev
+python3 -m http.server --directory docs 8000
 ```
 
-Then open the local URL printed by Vite.
+Then open `http://localhost:8000` in your browser.
 
-### Build + deploy to GitHub Pages
-
-```bash
-npm run build
-```
-
-The build outputs to the `docs/` folder, which GitHub Pages can serve.
+### Deploy to GitHub Pages
 
 1. In your GitHub repo settings, enable GitHub Pages.
 2. Choose the `main` branch and `/docs` folder as the source.
