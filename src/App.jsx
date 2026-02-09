@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useSettings } from "./settings.jsx";
 
 const STORAGE_KEY = "phasefuel_api_key";
 const PLAN_STORAGE_KEY = "phasefuel_meal_plans";
@@ -8,10 +9,49 @@ const getStoredPlans = () => {
   return raw ? JSON.parse(raw) : {};
 };
 
-const buildPrompt = (cycleDay, symptoms) =>
-  `Generate a healthy meal plan for cycle day ${cycleDay} with symptoms: ${symptoms}`;
+const buildPrompt = (cycleDay, symptoms, settings) => {
+  const preferences = [];
+  const features = [];
 
-const requestMealPlan = async ({ apiKey, cycleDay, symptoms }) => {
+  if (settings.preferLeftoverLunch) {
+    preferences.push("Prefer leftover-based lunches where possible.");
+  }
+  if (settings.preferBatchCooking) {
+    preferences.push("Favor batch cooking and reusable components.");
+  }
+  if (settings.showOccultReadingLayer) {
+    preferences.push("Include a short occult-themed reading layer for each day.");
+  }
+
+  if (settings.featureFlags.enablePantryTracking) {
+    features.push("Include pantry tracking prompts.");
+  }
+  if (settings.featureFlags.enableLeftoverFatiguePrevention) {
+    features.push("Rotate leftovers to prevent fatigue.");
+  }
+  if (settings.featureFlags.enableBatchDay) {
+    features.push("Designate a batch day prep block.");
+  }
+  if (settings.featureFlags.enableFreezerTags) {
+    features.push("Tag freezer-friendly items.");
+  }
+  if (settings.featureFlags.enableBudgetOptimizer) {
+    features.push("Optimize for budget-friendly ingredients.");
+  }
+  if (settings.featureFlags.enableUseWhatYouHaveMode) {
+    features.push("Prioritize use-what-you-have mode.");
+  }
+
+  return [
+    `Generate a healthy meal plan for cycle day ${cycleDay} with symptoms: ${symptoms}.`,
+    preferences.length ? `Preferences: ${preferences.join(" ")}` : "",
+    features.length ? `Advanced features: ${features.join(" ")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+};
+
+const requestMealPlan = async ({ apiKey, cycleDay, symptoms, settings }) => {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -24,7 +64,7 @@ const requestMealPlan = async ({ apiKey, cycleDay, symptoms }) => {
       messages: [
         {
           role: "user",
-          content: buildPrompt(cycleDay, symptoms),
+          content: buildPrompt(cycleDay, symptoms, settings),
         },
       ],
     }),
@@ -50,6 +90,7 @@ export default function App() {
   const [lookupUserId, setLookupUserId] = useState("");
   const [savedPlan, setSavedPlan] = useState("No saved plan loaded.");
   const [isLoading, setIsLoading] = useState(false);
+  const { settings, updateSettings } = useSettings();
 
   const plansByUser = useMemo(() => getStoredPlans(), [plan, savedPlan]);
 
@@ -80,6 +121,7 @@ export default function App() {
         apiKey: apiKey.trim(),
         cycleDay: cycleDay.trim(),
         symptoms: symptoms.trim(),
+        settings,
       });
       setPlan(responsePlan || "No plan returned.");
       const updatedPlans = {
@@ -88,6 +130,7 @@ export default function App() {
           cycle_day: Number(cycleDay),
           symptoms: symptoms.trim(),
           meal_plan: responsePlan,
+          settings_snapshot: settings,
         },
       };
       localStorage.setItem(PLAN_STORAGE_KEY, JSON.stringify(updatedPlans));
@@ -127,6 +170,66 @@ export default function App() {
     }
   };
 
+  const coreSettings = [
+    {
+      key: "preferLeftoverLunch",
+      label: "Prefer leftover lunch",
+      description: "Bias plan toward leftover-friendly lunches.",
+      value: settings.preferLeftoverLunch,
+      onChange: () =>
+        updateSettings({ preferLeftoverLunch: !settings.preferLeftoverLunch }),
+    },
+    {
+      key: "preferBatchCooking",
+      label: "Prefer batch cooking",
+      description: "Encourage bulk prep and reusable components.",
+      value: settings.preferBatchCooking,
+      onChange: () =>
+        updateSettings({ preferBatchCooking: !settings.preferBatchCooking }),
+    },
+    {
+      key: "showOccultReadingLayer",
+      label: "Show occult reading layer",
+      description: "Add the mystical narrative overlay in outputs.",
+      value: settings.showOccultReadingLayer,
+      onChange: () =>
+        updateSettings({ showOccultReadingLayer: !settings.showOccultReadingLayer }),
+    },
+  ];
+
+  const featureFlags = [
+    {
+      key: "enablePantryTracking",
+      label: "Enable pantry tracking",
+      description: "Track pantry staples and reuse signals.",
+    },
+    {
+      key: "enableLeftoverFatiguePrevention",
+      label: "Enable leftover fatigue prevention",
+      description: "Cycle leftovers to avoid repetition fatigue.",
+    },
+    {
+      key: "enableBatchDay",
+      label: "Enable batch day",
+      description: "Schedule a dedicated batch cooking day.",
+    },
+    {
+      key: "enableFreezerTags",
+      label: "Enable freezer tags",
+      description: "Mark freezer-ready meals in the plan.",
+    },
+    {
+      key: "enableBudgetOptimizer",
+      label: "Enable budget optimizer",
+      description: "Focus on budget-conscious ingredients.",
+    },
+    {
+      key: "enableUseWhatYouHaveMode",
+      label: "Enable use-what-you-have mode",
+      description: "Prioritize pantry-first recipes.",
+    },
+  ];
+
   return (
     <div className="page">
       <header className="banner">
@@ -137,6 +240,12 @@ export default function App() {
             A stark, high-contrast control panel for generating cycle-aware meal plans and
             saving them locally.
           </p>
+          <nav className="nav">
+            <a href="#api-vault">API Vault</a>
+            <a href="#generator">Generator</a>
+            <a href="#settings">Settings</a>
+            <a href="#saved-plans">Saved Plans</a>
+          </nav>
         </div>
         <div className="stats">
           <div>
@@ -151,7 +260,7 @@ export default function App() {
       </header>
 
       <main className="grid">
-        <section className="panel">
+        <section className="panel" id="api-vault">
           <h2>API Vault</h2>
           <p>Paste your OpenAI API key. It never leaves this browser.</p>
           <label>
@@ -168,7 +277,7 @@ export default function App() {
           </button>
         </section>
 
-        <section className="panel wide">
+        <section className="panel wide" id="generator">
           <h2>Plan Generator</h2>
           <form onSubmit={handleGenerate} className="form-grid">
             <label>
@@ -214,7 +323,65 @@ export default function App() {
           </div>
         </section>
 
-        <section className="panel">
+        {settings.showOccultReadingLayer ? (
+          <section className="panel">
+            <h2>Occult Reading Layer</h2>
+            <p>
+              The oracle is active. Your plans will include a mystical layer that maps
+              cravings to cycle energy.
+            </p>
+            <div className="toggle-pill">Status: Enabled</div>
+          </section>
+        ) : null}
+
+        <section className="panel" id="settings">
+          <h2>Settings</h2>
+          <p>Toggle core preferences and experimental feature flags.</p>
+          <div className="toggle-group">
+            <h3>Core Preferences</h3>
+            <div className="toggle-list">
+              {coreSettings.map((item) => (
+                <label className="toggle-item" key={item.key}>
+                  <div>
+                    <span className="toggle-label">{item.label}</span>
+                    <span className="toggle-description">{item.description}</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={item.value}
+                    onChange={item.onChange}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="toggle-group">
+            <h3>Feature Flags</h3>
+            <div className="toggle-list">
+              {featureFlags.map((flag) => (
+                <label className="toggle-item" key={flag.key}>
+                  <div>
+                    <span className="toggle-label">{flag.label}</span>
+                    <span className="toggle-description">{flag.description}</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.featureFlags[flag.key]}
+                    onChange={() =>
+                      updateSettings({
+                        featureFlags: {
+                          [flag.key]: !settings.featureFlags[flag.key],
+                        },
+                      })
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="panel" id="saved-plans">
           <h2>Saved Plans</h2>
           <p>Pull a saved plan by user ID, or wipe it.</p>
           <label>
