@@ -10,6 +10,7 @@
   --muted: #8b95a7;
   --input: #0f1422;
   --output: #1a2033;
+  --danger: #ff6b6b;
 }
 
 * {
@@ -144,6 +145,15 @@ textarea {
   color: var(--ink);
 }
 
+select {
+  border: 2px solid var(--border);
+  padding: 0.7rem;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: var(--input);
+  color: var(--ink);
+}
+
 input::placeholder,
 textarea::placeholder {
   color: var(--muted);
@@ -195,6 +205,45 @@ button.ghost {
   border-top: 2px solid var(--border);
   padding-top: 0.75rem;
   color: var(--muted);
+}
+
+.status-pill {
+  align-self: flex-start;
+  border: 2px solid var(--border);
+  padding: 0.35rem 0.6rem;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+}
+
+.status-pill.generating {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.status-pill.success {
+  border-color: #4ade80;
+  color: #4ade80;
+}
+
+.status-pill.error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.inline-note {
+  font-size: 0.8rem;
+  color: var(--muted);
+  border: 2px dashed var(--border);
+  padding: 0.6rem;
+}
+
+.status.error {
+  border-color: var(--danger);
+  color: var(--danger);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .button-row {
@@ -267,5 +316,13 @@ footer {
 
   .banner {
     text-align: left;
+  }
+
+  .flow-row {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-arrow {
+    transform: rotate(90deg);
   }
 }
