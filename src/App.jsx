@@ -30,6 +30,7 @@ import { loadHistory, MAX_HISTORY, saveHistory, updateHistory } from "./modules/
 
 const STORAGE_KEY = "phasefuel_api_key";
 const PLAN_STORAGE_KEY = "phasefuel_meal_plans";
+const GROCERY_CHECK_KEY = "phasefuel_grocery_checks";
 
 const TRANSFORMATION_LIBRARY = [
   "wrap",
@@ -42,8 +43,35 @@ const TRANSFORMATION_LIBRARY = [
   "frittata",
 ];
 
+const VIEW_LABELS = {
+  today: "Period",
+  plan: "PLAN",
+  grocery: "GROCERY",
+  profile: "Profile",
+  settings: "Settings",
+};
+
+const ENERGY_BY_PHASE = {
+  menstrual: "Low",
+  follicular: "Rising",
+  ovulatory: "High",
+  luteal: "Steady",
+};
+
+const FOCUS_BY_PHASE = {
+  menstrual: "Restorative",
+  follicular: "Creative",
+  ovulatory: "Social",
+  luteal: "Grounded",
+};
+
 const getStoredPlans = () => {
   const raw = localStorage.getItem(PLAN_STORAGE_KEY);
+  return raw ? JSON.parse(raw) : {};
+};
+
+const getStoredChecks = () => {
+  const raw = localStorage.getItem(GROCERY_CHECK_KEY);
   return raw ? JSON.parse(raw) : {};
 };
 
@@ -183,6 +211,29 @@ const buildFlowMap = (plan) => {
   return map;
 };
 
+const formatPhase = (value) => (value ? `${value[0].toUpperCase()}${value.slice(1)}` : "Unknown");
+
+const formatMoon = (moonInfo) => moonInfo?.name || "New Moon";
+
+const buildWeekdayLabels = (count) => {
+  const today = new Date();
+  return Array.from({ length: count }, (_, index) => {
+    const next = new Date(today);
+    next.setDate(today.getDate() + index);
+    return next.toLocaleDateString(undefined, { weekday: "short" });
+  });
+};
+
+const groupGroceries = (items) =>
+  items.reduce((acc, item) => {
+    const category = item.category || "Other";
+    if (!acc[category]) {
+      acc[category] = [];
+    }
+    acc[category].push(item);
+    return acc;
+  }, {});
+
 export default function App() {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem(STORAGE_KEY) || "");
   const [userId, setUserId] = useState("");
@@ -211,20 +262,16 @@ export default function App() {
   const [savedPlan, setSavedPlan] = useState("No saved plan loaded.");
   const [isLoading, setIsLoading] = useState(false);
   const [useWhatYouHaveOverride, setUseWhatYouHaveOverride] = useState(false);
-  const [activeView, setActiveView] = useState("plan");
+  const [activeView, setActiveView] = useState("today");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activePlanDay, setActivePlanDay] = useState(null);
+  const [groceryChecks, setGroceryChecks] = useState(() => getStoredChecks());
   const { settings, setSettings, updateSettings } = useSettings();
 
   const plansByUser = useMemo(() => getStoredPlans(), [plannerData, savedPlan]);
   const mealPlan = plannerData?.mealPlan || null;
   const flowMap = useMemo(() => buildFlowMap(mealPlan), [mealPlan]);
   const pantryFirst = settings.featureFlags.enableUseWhatYouHaveMode || useWhatYouHaveOverride;
-  const requestSummary = {
-    userId: userId.trim() || "Not set",
-    cycleDay: cycleDay.trim() || "Not set",
-    symptoms: symptoms.trim() || "Not set",
-    pantryMode: pantryFirst ? "On" : "Off",
-    budgetNotes: budgetNotes.trim() || "None",
-  };
   const cycleInfo = useMemo(
     () => calculateCyclePhase(new Date(), settings.cyclePreferences),
     [settings.cyclePreferences]
@@ -246,6 +293,16 @@ export default function App() {
   useEffect(() => {
     saveHistory(historyItems);
   }, [historyItems]);
+
+  useEffect(() => {
+    localStorage.setItem(GROCERY_CHECK_KEY, JSON.stringify(groceryChecks));
+  }, [groceryChecks]);
+
+  useEffect(() => {
+    if (mealPlan?.days?.length) {
+      setActivePlanDay((current) => current ?? mealPlan.days[0].day);
+    }
+  }, [mealPlan]);
 
   const handleSettingsChange = (key, value) => {
     updateSettings({ [key]: value });
@@ -452,6 +509,39 @@ export default function App() {
     }
   };
 
+  const handleCopyGroceries = async () => {
+    const grouped = groupGroceries(groceryList);
+    const lines = Object.entries(grouped).flatMap(([category, items]) => [
+      category.toUpperCase(),
+      ...items.map((item) => `- ${item.qty} ${item.unit} ${item.name}`.trim()),
+      "",
+    ]);
+    try {
+      await navigator.clipboard.writeText(lines.join("\n").trim());
+      setStatus("Grocery list copied to clipboard.");
+    } catch (error) {
+      setStatus("Unable to copy groceries in this browser.");
+    }
+  };
+
+  const toggleDrawer = () => setDrawerOpen((open) => !open);
+
+  const toggleCheck = (itemKey) => {
+    setGroceryChecks((current) => ({
+      ...current,
+      [itemKey]: !current[itemKey],
+    }));
+  };
+
+  const clearChecks = () => {
+    setGroceryChecks({});
+  };
+
+  const handleNav = (view) => {
+    setActiveView(view);
+    setDrawerOpen(false);
+  };
+
   const coreSettings = [
     {
       key: "preferLeftoverLunch",
@@ -512,143 +602,264 @@ export default function App() {
     },
   ];
 
+  const weekdayLabels = buildWeekdayLabels(mealPlan?.days?.length || 7);
+  const dayChips = (mealPlan?.days || Array.from({ length: 7 }, (_, index) => ({ day: index + 1 })))
+    .map((day, index) => ({
+      label: weekdayLabels[index] || `Day ${day.day}`,
+      value: day.day,
+    }));
+
+  const activeDayData = mealPlan?.days?.find((day) => day.day === activePlanDay) || null;
+  const leftoverCards = mealPlan?.leftoversGraph?.length
+    ? mealPlan.leftoversGraph.map((link) => {
+        const fromDay = link.fromDayIndex ?? link.fromDay;
+        const toDay = link.toDayIndex ?? link.toDay;
+        const from = mealPlan.days.find((day) => day.day === fromDay);
+        const transformList = from?.meals?.dinner?.transformationOptions || [];
+        return {
+          key: `${fromDay}-${toDay}`,
+          title: "DINNER • LUNCH",
+          transform: transformList.length ? transformList.join(" / ") : "Bowl / Wrap / Salad",
+          time: "5 min",
+        };
+      })
+    : [
+        { key: "placeholder-1", title: "DINNER • LUNCH", transform: "Bowl / Wrap / Salad", time: "5 min" },
+        { key: "placeholder-2", title: "DINNER • LUNCH", transform: "Soup Remix / Fried Rice", time: "10 min" },
+      ];
+
+  const groceryGroups = groupGroceries(groceryList);
+  const groceryCount = groceryList.length;
+  const groceryTotals = plannerData?.groceryList?.totals || null;
+
   return (
-    <div className="page">
-      <header className="banner">
-        <div>
-          <p className="tag">PhaseFuel</p>
-          <h1>Brutalist Cycle Meal Planner</h1>
-          <p className="subhead">
-            A stark, high-contrast control panel for generating cycle-aware meal plans and
-            saving them locally.
-          </p>
-          <nav className="nav app-nav" aria-label="Primary">
-            <button
-              type="button"
-              className={activeView === "plan" ? "active" : ""}
-              onClick={() => setActiveView("plan")}
-            >
-              Plan
-            </button>
-            <button
-              type="button"
-              className={activeView === "settings" ? "active" : ""}
-              onClick={() => setActiveView("settings")}
-            >
-              Settings
-            </button>
-          </nav>
-        </div>
-        <div className="stats">
+    <div className="app-shell">
+      <header className="top-bar">
+        <div className="top-left">
+          <span className="brand-dot" aria-hidden="true" />
           <div>
-            <span>Total Saved</span>
-            <strong>{Object.keys(plansByUser).length}</strong>
-          </div>
-          <div>
-            <span>Status</span>
-            <strong>{isLoading ? "Working" : "Idle"}</strong>
+            <div className="screen-title">{VIEW_LABELS[activeView]}</div>
+            <div className="screen-subtitle">PhaseFuel</div>
           </div>
         </div>
+        <button type="button" className="icon-button" onClick={toggleDrawer} aria-label="Menu">
+          <span className="icon-line" />
+          <span className="icon-line" />
+          <span className="icon-line" />
+        </button>
       </header>
 
-      <main className="layout">
-        <div className="column primary">
-          <section className="panel" id="api-vault">
-          <h2>API Vault</h2>
-          <p>Paste your OpenAI API key. It never leaves this browser.</p>
-          <label>
-            API Key
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder="sk-..."
-            />
-          </label>
-          <button type="button" onClick={handleSaveKey}>
-            Save Key
-          </button>
-          </section>
+      {drawerOpen ? (
+        <div className="drawer" role="dialog" aria-modal="true">
+          <div className="drawer-header">
+            <span className="drawer-title">Navigate</span>
+            <button type="button" className="icon-button" onClick={toggleDrawer} aria-label="Close">
+              ✕
+            </button>
+          </div>
+          <div className="drawer-links">
+            {Object.keys(VIEW_LABELS).map((view) => (
+              <button
+                key={view}
+                type="button"
+                className={activeView === view ? "drawer-link active" : "drawer-link"}
+                onClick={() => handleNav(view)}
+              >
+                {VIEW_LABELS[view]}
+              </button>
+            ))}
+          </div>
+          <div className="drawer-footer">
+            <div className="status-pill">Status: {generationState}</div>
+            <div className="status-note">{status}</div>
+          </div>
+        </div>
+      ) : null}
 
-          <section className="panel panel-hero" id="generator">
-            <h2>Plan Generator</h2>
-            <form onSubmit={handleGenerate} className="form-grid">
-              <label>
-                User ID
-                <input
-                  type="text"
-                  value={userId}
-                  onChange={(event) => setUserId(event.target.value)}
-                  placeholder="alex"
-                  required
-                />
-              </label>
-              <label>
-                Cycle Day
-                <input
-                  type="number"
-                  min="1"
-                  max="31"
-                  value={cycleDay}
-                  onChange={(event) => setCycleDay(event.target.value)}
-                  placeholder="14"
-                  required
-                />
-              </label>
-              <label className="stretch">
-                Symptoms
-                <textarea
-                  rows="3"
-                  value={symptoms}
-                  onChange={(event) => setSymptoms(event.target.value)}
-                  placeholder="bloating, low energy"
-                  required
-                />
-              </label>
-              {settings.featureFlags.enablePantryTracking ? (
-                <div className="inline-note">
-                  Pantry items: {summarizePantry(pantryItems) || "None added yet."}
+      <main className="app-main">
+        {activeView === "today" ? (
+          <section className="screen">
+            <div className="hero-block">
+              <h1>Today</h1>
+              <div className="info-pill">
+                Day {(cycleInfo.dayInCycle ?? cycleDay) || "--"} • {formatPhase(cycleInfo.phase)} • {formatMoon(moonInfo)}
+              </div>
+              <p className="hero-line">Cycle-aware meals. Period.</p>
+              <div className="stat-lines">
+                <div>
+                  <span>Energy</span>
+                  <strong>{ENERGY_BY_PHASE[cycleInfo.phase] || "Steady"}</strong>
                 </div>
-              ) : null}
-              {settings.featureFlags.enableBudgetOptimizer ? (
-                <label className="stretch">
-                  Budget Constraints
-                  <textarea
-                    rows="2"
-                    value={budgetNotes}
-                    onChange={(event) => setBudgetNotes(event.target.value)}
-                    placeholder="$60/week, prioritize bulk grains"
+                <div>
+                  <span>Focus</span>
+                  <strong>{FOCUS_BY_PHASE[cycleInfo.phase] || "Grounded"}</strong>
+                </div>
+              </div>
+              <form onSubmit={handleGenerate} className="form-grid">
+                <label>
+                  User ID
+                  <input
+                    type="text"
+                    value={userId}
+                    onChange={(event) => setUserId(event.target.value)}
+                    placeholder="alex"
+                    required
                   />
                 </label>
-              ) : null}
-              <div className="button-row">
-                <button type="submit" disabled={isLoading}>
+                <label>
+                  Cycle Day
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    value={cycleDay}
+                    onChange={(event) => setCycleDay(event.target.value)}
+                    placeholder="14"
+                    required
+                  />
+                </label>
+                <label className="stretch">
+                  Symptoms
+                  <textarea
+                    rows="3"
+                    value={symptoms}
+                    onChange={(event) => setSymptoms(event.target.value)}
+                    placeholder="bloating, low energy"
+                    required
+                  />
+                </label>
+                {settings.featureFlags.enableBudgetOptimizer ? (
+                  <label className="stretch">
+                    Budget Constraints
+                    <textarea
+                      rows="2"
+                      value={budgetNotes}
+                      onChange={(event) => setBudgetNotes(event.target.value)}
+                      placeholder="$60/week, prioritize bulk grains"
+                    />
+                  </label>
+                ) : null}
+                <button type="submit" className="primary-button" disabled={isLoading}>
                   {isLoading ? "Generating..." : "Generate Plan"}
                 </button>
-                {settings.featureFlags.enableUseWhatYouHaveMode ||
-                settings.featureFlags.enablePantryTracking ? (
-                  <button type="button" className="ghost" onClick={handleUseWhatYouHave}>
-                    Use What You Have (This Run)
+              </form>
+              <div className="secondary-actions">
+                {(settings.featureFlags.enableUseWhatYouHaveMode ||
+                  settings.featureFlags.enablePantryTracking) && (
+                  <button type="button" className="link-button" onClick={handleUseWhatYouHave}>
+                    Use what you have &gt;
                   </button>
-                ) : null}
+                )}
               </div>
-            </form>
-            <div className="status-row">
-              <div className={`status-pill ${generationState}`}>State: {generationState}</div>
-              {pantryFirst ? <div className="toggle-pill">Pantry-first plan</div> : null}
+              <div className="status-strip">
+                <div className={`status-pill ${generationState}`}>State: {generationState}</div>
+                {pantryFirst ? <div className="tag">Pantry-first plan</div> : null}
+              </div>
+              <div className="status-note">{status}</div>
+              {plannerError ? <div className="alert">{plannerError}</div> : null}
             </div>
-            <div className="status">{status}</div>
-            {plannerError ? (
-              <div className="status error">
-                {plannerError}
-                <button type="button" className="ghost" onClick={generatePlan}>
-                  Retry Generation
-                </button>
+            <details className="accordion" open={false}>
+              <summary>READING</summary>
+              <div className="accordion-body">
+                {settings.showOccultReadingLayer ? (
+                  <pre>{occultReading}</pre>
+                ) : (
+                  <p>Enable the occult layer in Settings to unlock today&apos;s reading.</p>
+                )}
               </div>
-            ) : null}
+            </details>
+          </section>
+        ) : null}
+
+        {activeView === "plan" ? (
+          <section className="screen">
+            <div className="section-header">
+              <h2>PLAN</h2>
+              <div className="chip-row">
+                {dayChips.map((chip) => (
+                  <button
+                    key={chip.value}
+                    type="button"
+                    className={activePlanDay === chip.value ? "chip active" : "chip"}
+                    onClick={() => setActivePlanDay(chip.value)}
+                  >
+                    <span>{chip.label}</span>
+                    {activePlanDay === chip.value ? <span className="chip-dot" /> : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="plan-section">
+              <h3>{activeDayData ? `Day ${activeDayData.day}` : "Wednesday"}</h3>
+              <details className="accordion">
+                <summary>Breakfast</summary>
+                <div className="accordion-body">
+                  {activeDayData?.meals?.breakfast ? (
+                    <div>
+                      <strong>{activeDayData.meals.breakfast.name}</strong>
+                      <p>{activeDayData.meals.breakfast.ingredients.join(", ")}</p>
+                    </div>
+                  ) : (
+                    <p>Steel-cut oats with berries and almond butter.</p>
+                  )}
+                </div>
+              </details>
+              <details className="accordion">
+                <summary>Lunch</summary>
+                <div className="accordion-body">
+                  {activeDayData?.meals?.lunch ? (
+                    <div>
+                      <strong>{activeDayData.meals.lunch.name}</strong>
+                      <p>{activeDayData.meals.lunch.ingredients.join(", ")}</p>
+                    </div>
+                  ) : (
+                    <p>Leftover roasted veg bowl with tahini drizzle.</p>
+                  )}
+                </div>
+              </details>
+            </div>
+
+            <div className="leftover-stack">
+              {leftoverCards.map((card) => (
+                <div className="transform-card" key={card.key}>
+                  <span className="card-kicker">{card.title}</span>
+                  <div className="card-main">Transform: {card.transform}</div>
+                  <div className="card-meta">{card.time}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="plan-section">
+              <h3>Thursday</h3>
+              <div className="meal-card">
+                <div>
+                  <h4>{activeDayData?.meals?.dinner?.name || "Roasted Veggie Tray Bake"}</h4>
+                  <div className="tag-row">
+                    <span className="tag">{formatPhase(cycleInfo.phase)} phase</span>
+                    <span className="tag">batch-tag</span>
+                  </div>
+                  <p>
+                    {activeDayData?.meals?.dinner?.ingredients?.join(", ") ||
+                      "Broccoli, sweet potato, chickpeas, olive oil."}
+                  </p>
+                </div>
+                <div className="card-actions">
+                  <button type="button" className="ghost">
+                    Swap
+                  </button>
+                  <button type="button" className="ghost">
+                    Mark Cooked
+                  </button>
+                  <button type="button" className="ghost">
+                    Add to Grocery
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {mealPlan ? (
-              <div className="output">
-                <h3>Meal Plan Flow</h3>
+              <div className="plan-flow">
+                <h3>Leftover Flow</h3>
                 <div className="flow-list">
                   {mealPlan.days.map((day) => {
                     const nextDay = flowMap.get(day.day);
@@ -659,24 +870,13 @@ export default function App() {
                           <div>
                             <span className="flow-title">Dinner</span>
                             <div>{day.meals.dinner.name}</div>
-                            <div className="flow-meta">
-                              Batch tag: {day.meals.dinner.batchTag}
-                            </div>
-                            <div className="flow-meta">
-                              Servings cooked: {day.meals.dinner.servingsCooked}
-                            </div>
+                            <div className="flow-meta">Batch tag: {day.meals.dinner.batchTag}</div>
                             <div className="flow-meta">
                               Leftovers: {day.meals.dinner.leftoverPortions} portion(s)
                             </div>
                             <div className="flow-meta">
                               Transformations: {day.meals.dinner.transformationOptions.join(", ")}
                             </div>
-                            {settings.featureFlags.enableFreezerTags &&
-                            day.meals.dinner.freezeFriendly ? (
-                              <div className="freeze-pill">
-                                Freeze {day.meals.dinner.freezePortions || 0} portion(s)
-                              </div>
-                            ) : null}
                           </div>
                           <div className="flow-arrow">→</div>
                           <div>
@@ -686,9 +886,8 @@ export default function App() {
                             </div>
                             {nextDay ? (
                               <div className="flow-meta">
-                                {mealPlan.days.find(
-                                  (planDay) => planDay.day === nextDay
-                                )?.meals.lunch.name}
+                                {mealPlan.days.find((planDay) => planDay.day === nextDay)?.meals
+                                  .lunch.name}
                               </div>
                             ) : null}
                           </div>
@@ -699,101 +898,136 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <div className="output">
-                <h3>Latest Planner Output</h3>
-                <pre>{plannerRaw}</pre>
+              <div className="empty-state">
+                <p>No plan generated yet. Head to Today and generate a plan.</p>
               </div>
             )}
           </section>
+        ) : null}
 
-          {plannerData ? (
-            <section className="panel">
-              <h2>Grocery List</h2>
-              <p>Planner-generated list with quantities and categories.</p>
-              <ul className="grocery-list">
-                {groceryList.map((item) => (
-                  <li key={`${item.name}-${item.category}`}>
-                    <span className="grocery-item">{item.name}</span>
-                    <span className="grocery-count">
-                      {item.qty} {item.unit}
-                    </span>
-                    <span className="grocery-meta">{item.category}</span>
-                    {item.substitutions?.length ? (
-                      <span className="grocery-meta">
-                        Swaps: {item.substitutions.join(" • ")}
-                      </span>
-                    ) : null}
-                    {item.notes?.length ? (
-                      <span className="grocery-meta">
-                        Notes: {item.notes.join(" • ")}
-                      </span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-              {plannerData.groceryList.totals ? (
-                <div className="cost-block">
-                  Estimated totals: {plannerData.groceryList.totals.estMin} -
-                  {` ${plannerData.groceryList.totals.estMax}`}
-                </div>
-              ) : null}
-              <div className="prep-block">
-                <h3>Prep Steps</h3>
-                <ol>
-                  {prepSteps.map((step) => (
-                    <li key={step}>{step}</li>
-                  ))}
-                </ol>
+        {activeView === "grocery" ? (
+          <section className="screen">
+            <div className="section-header">
+              <h2>GROCERY</h2>
+              <div className="search-row">
+                <input type="search" placeholder="Search groceries" />
+                <button type="button" className="ghost" onClick={handleCopyGroceries}>
+                  Copy
+                </button>
+                <button type="button" className="ghost" onClick={clearChecks}>
+                  Clear Checks
+                </button>
               </div>
-              {estimatedCost ? (
-                <div className="cost-block">
-                  Estimated Cost: {estimatedCost.currency} {estimatedCost.min} -
-                  {` ${estimatedCost.max}`}
+            </div>
+            <div className="accordion-stack">
+              {Object.entries(groceryGroups).length ? (
+                Object.entries(groceryGroups).map(([category, items]) => (
+                  <details className="accordion" key={category} open>
+                    <summary>{category.toUpperCase()}</summary>
+                    <div className="accordion-body">
+                      {items.map((item) => {
+                        const key = `${item.category}-${item.name}`;
+                        return (
+                          <label className="checkbox-row" key={key}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(groceryChecks[key])}
+                              onChange={() => toggleCheck(key)}
+                            />
+                            <span className="checkbox-label">
+                              {item.name}
+                              <span className="checkbox-meta">
+                                {item.qty} {item.unit}
+                              </span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </details>
+                ))
+              ) : (
+                <div className="empty-state">
+                  <p>No grocery list yet. Generate a plan to populate items.</p>
+                </div>
+              )}
+            </div>
+            <div className="grocery-footer">
+              {settings.featureFlags.enableBudgetOptimizer && settings.weeklyBudget ? (
+                <div className="budget-meter">
+                  <div className="budget-row">
+                    <span>Weekly Budget</span>
+                    <strong>${settings.weeklyBudget}</strong>
+                  </div>
+                  <div className="budget-row">
+                    <span>Planner Estimate</span>
+                    <strong>
+                      {groceryTotals
+                        ? `$${groceryTotals.estMin} - $${groceryTotals.estMax}`
+                        : "Not available"}
+                    </strong>
+                  </div>
                 </div>
               ) : null}
-              {settings.featureFlags.enableBatchDay ? (
-                <div className="prep-block">
-                  <h3>Batch Day Checklist</h3>
-                  <ul>
-                    {prepSteps
-                      .filter((step) =>
-                        step.toLowerCase().includes(settings.batchDayOfWeek.toLowerCase())
-                      )
-                      .map((step) => (
-                        <li key={step}>{step}</li>
-                      ))}
-                  </ul>
-                </div>
-              ) : null}
-              <details className="raw-json">
-                <summary>Raw JSON response</summary>
-                <pre>{plannerRaw}</pre>
-              </details>
-            </section>
-          ) : null}
+              <div className="total-items">Total items: {groceryCount}</div>
+            </div>
+          </section>
+        ) : null}
 
-          {settings.showOccultReadingLayer ? (
-            <section className="panel">
-              <h2>Occult Reading Layer</h2>
-              <p>
-                The oracle is active. Your plans will include a mystical layer that maps
-                cravings to cycle energy.
-              </p>
-              <div className="toggle-pill">Status: Enabled</div>
-              <div className="output">
-                <h3>Today&apos;s Reading</h3>
-                <pre>{occultReading}</pre>
+        {activeView === "profile" ? (
+          <section className="screen">
+            <div className="section-header">
+              <h2>Profile</h2>
+              <p className="muted">Manage your API vault and saved plan archive.</p>
+            </div>
+            <div className="card">
+              <h3>API Vault</h3>
+              <p>Paste your OpenAI API key. It never leaves this browser.</p>
+              <label>
+                API Key
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  placeholder="sk-..."
+                />
+              </label>
+              <button type="button" className="primary-button" onClick={handleSaveKey}>
+                Save Key
+              </button>
+            </div>
+            <div className="card">
+              <h3>Saved Plans</h3>
+              <p>Pull a saved plan by user ID, or wipe it.</p>
+              <label>
+                Lookup User ID
+                <input
+                  type="text"
+                  value={lookupUserId}
+                  onChange={(event) => setLookupUserId(event.target.value)}
+                  placeholder="alex"
+                />
+              </label>
+              <div className="button-row">
+                <button type="button" className="primary-button" onClick={handleLoadPlan}>
+                  Load Plan
+                </button>
+                <button type="button" className="ghost" onClick={handleClearPlan}>
+                  Clear Plan
+                </button>
               </div>
-            </section>
-          ) : null}
+              <pre className="output">{savedPlan}</pre>
+            </div>
+          </section>
+        ) : null}
 
-        </div>
-
-        <div className="column secondary">
-          <section className="panel" id="settings">
-            <h2>Settings</h2>
-            <p>Toggle core preferences and experimental feature flags.</p>
-            <div className="toggle-group">
+        {activeView === "settings" ? (
+          <section className="screen">
+            <div className="section-header">
+              <h2>Settings</h2>
+              <p className="muted">Toggles, cycle preferences, and feature modules.</p>
+            </div>
+            <div className="card">
               <h3>Core Preferences</h3>
               <div className="toggle-list">
                 {coreSettings.map((item) => (
@@ -802,16 +1036,12 @@ export default function App() {
                       <span className="toggle-label">{item.label}</span>
                       <span className="toggle-description">{item.description}</span>
                     </div>
-                    <input
-                      type="checkbox"
-                      checked={item.value}
-                      onChange={item.onChange}
-                    />
+                    <input type="checkbox" checked={item.value} onChange={item.onChange} />
                   </label>
                 ))}
               </div>
             </div>
-            <div className="toggle-group">
+            <div className="card">
               <h3>Cycle Preferences</h3>
               <div className="cycle-grid">
                 <label>
@@ -856,7 +1086,7 @@ export default function App() {
                 </label>
               </div>
             </div>
-            <div className="toggle-group">
+            <div className="card">
               <h3>Batch & Budget</h3>
               <div className="cycle-grid">
                 <label>
@@ -864,9 +1094,7 @@ export default function App() {
                   <input
                     type="text"
                     value={settings.batchDayOfWeek}
-                    onChange={(event) =>
-                      handleSettingsChange("batchDayOfWeek", event.target.value)
-                    }
+                    onChange={(event) => handleSettingsChange("batchDayOfWeek", event.target.value)}
                   />
                 </label>
                 <label>
@@ -901,9 +1129,7 @@ export default function App() {
                   Cost Mode
                   <select
                     value={settings.costMode}
-                    onChange={(event) =>
-                      handleSettingsChange("costMode", event.target.value)
-                    }
+                    onChange={(event) => handleSettingsChange("costMode", event.target.value)}
                   >
                     <option value="tight">Tight</option>
                     <option value="normal">Normal</option>
@@ -912,7 +1138,7 @@ export default function App() {
                 </label>
               </div>
             </div>
-            <div className="toggle-group">
+            <div className="card">
               <h3>Feature Flags</h3>
               <div className="toggle-list">
                 {featureFlags.map((flag) => (
@@ -939,228 +1165,218 @@ export default function App() {
             <button type="button" className="ghost" onClick={handleResetDefaults}>
               Reset to Defaults
             </button>
-          </section>
 
-          {settings.featureFlags.enablePantryTracking ? (
-            <section className="panel" id="pantry">
-              <h2>Pantry</h2>
-              <p>Track pantry items for pantry-first planning.</p>
-              <form onSubmit={addPantryItem} className="form-grid">
-                <label>
-                  Item
-                  <input
-                    type="text"
-                    value={pantryInput.name}
-                    onChange={(event) =>
-                      setPantryInput((current) => ({ ...current, name: event.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Qty
-                  <input
-                    type="text"
-                    value={pantryInput.qty}
-                    onChange={(event) =>
-                      setPantryInput((current) => ({ ...current, qty: event.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Unit
-                  <input
-                    type="text"
-                    value={pantryInput.unit}
-                    onChange={(event) =>
-                      setPantryInput((current) => ({ ...current, unit: event.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Expires On
-                  <input
-                    type="date"
-                    value={pantryInput.expiresOn}
-                    onChange={(event) =>
-                      setPantryInput((current) => ({ ...current, expiresOn: event.target.value }))
-                    }
-                  />
-                </label>
-                <button type="submit">Add/Update Pantry Item</button>
-              </form>
-              <ul className="inventory-list">
-                {pantryItems.map((item) => (
-                  <li key={item.name}>
-                    <span>{item.name}</span>
-                    <span>{item.qty ? `${item.qty} ${item.unit || ""}` : ""}</span>
-                    <span>{item.expiresOn ? `Expires ${item.expiresOn}` : ""}</span>
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() =>
-                        setPantryItems((items) => removePantryItem(items, item.name))
+            {settings.featureFlags.enablePantryTracking ? (
+              <div className="card">
+                <h3>Pantry</h3>
+                <p>Track pantry items for pantry-first planning.</p>
+                <form onSubmit={addPantryItem} className="form-grid">
+                  <label>
+                    Item
+                    <input
+                      type="text"
+                      value={pantryInput.name}
+                      onChange={(event) =>
+                        setPantryInput((current) => ({ ...current, name: event.target.value }))
                       }
-                    >
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-
-          {settings.featureFlags.enableFreezerTags ? (
-            <section className="panel" id="freezer">
-              <h2>Freezer Inventory</h2>
-              <p>Track frozen portions for future planning.</p>
-              <form onSubmit={addFreezerEntry} className="form-grid">
-                <label>
-                  Item
-                  <input
-                    type="text"
-                    value={freezerInput.name}
-                    onChange={(event) =>
-                      setFreezerInput((current) => ({ ...current, name: event.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Portions
-                  <input
-                    type="number"
-                    min="1"
-                    value={freezerInput.portions}
-                    onChange={(event) =>
-                      setFreezerInput((current) => ({ ...current, portions: event.target.value }))
-                    }
-                  />
-                </label>
-                <button type="submit">Add to Freezer</button>
-              </form>
-              <ul className="inventory-list">
-                {freezerItems.map((item, index) => (
-                  <li key={`${item.name}-${index}`}>
-                    <span>{item.name}</span>
-                    <span>{item.portions ? `${item.portions} portions` : ""}</span>
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() =>
-                        setFreezerItems((items) => removeFreezerItem(items, index))
+                    />
+                  </label>
+                  <label>
+                    Qty
+                    <input
+                      type="text"
+                      value={pantryInput.qty}
+                      onChange={(event) =>
+                        setPantryInput((current) => ({ ...current, qty: event.target.value }))
                       }
-                    >
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-
-          {settings.featureFlags.enableBudgetOptimizer ? (
-            <section className="panel" id="prices">
-              <h2>Price Memory</h2>
-              <p>Store common prices for better estimates and swaps.</p>
-              <form onSubmit={addPriceEntry} className="form-grid">
-                <label>
-                  Item
-                  <input
-                    type="text"
-                    value={priceInput.name}
-                    onChange={(event) =>
-                      setPriceInput((current) => ({ ...current, name: event.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Unit
-                  <input
-                    type="text"
-                    value={priceInput.unit}
-                    onChange={(event) =>
-                      setPriceInput((current) => ({ ...current, unit: event.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Price
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={priceInput.price}
-                    onChange={(event) =>
-                      setPriceInput((current) => ({ ...current, price: event.target.value }))
-                    }
-                  />
-                </label>
-                <button type="submit">Add/Update Price</button>
-              </form>
-              <ul className="inventory-list">
-                {priceItems.map((item) => (
-                  <li key={item.name}>
-                    <span>{item.name}</span>
-                    <span>
-                      {item.price}/{item.unit}
-                    </span>
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() =>
-                        setPriceItems((items) => removePriceItem(items, item.name))
+                    />
+                  </label>
+                  <label>
+                    Unit
+                    <input
+                      type="text"
+                      value={pantryInput.unit}
+                      onChange={(event) =>
+                        setPantryInput((current) => ({ ...current, unit: event.target.value }))
                       }
-                    >
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              {settings.weeklyBudget ? (
-                <div className="cost-block">Weekly budget: {settings.weeklyBudget}</div>
-              ) : null}
-            </section>
-          ) : null}
-
-          {settings.featureFlags.enableLeftoverFatiguePrevention ? (
-            <section className="panel">
-              <h2>Leftover Rotation</h2>
-              <p>Recent transformations (avoids repetition).</p>
-              <div className="history-list">
-                {historyItems.length
-                  ? historyItems.map((item) => <span key={item}>{item}</span>)
-                  : "No history yet."}
+                    />
+                  </label>
+                  <label>
+                    Expires On
+                    <input
+                      type="date"
+                      value={pantryInput.expiresOn}
+                      onChange={(event) =>
+                        setPantryInput((current) => ({
+                          ...current,
+                          expiresOn: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <button type="submit" className="primary-button">
+                    Add/Update Pantry Item
+                  </button>
+                </form>
+                <ul className="inventory-list">
+                  {pantryItems.map((item) => (
+                    <li key={item.name}>
+                      <span>{item.name}</span>
+                      <span>{item.qty ? `${item.qty} ${item.unit || ""}` : ""}</span>
+                      <span>{item.expiresOn ? `Expires ${item.expiresOn}` : ""}</span>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => setPantryItems((items) => removePantryItem(items, item.name))}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <div className="history-meta">Tracking last {MAX_HISTORY} transformations.</div>
-            </section>
-          ) : null}
+            ) : null}
 
-          <section className="panel" id="saved-plans">
-            <h2>Saved Plans</h2>
-            <p>Pull a saved plan by user ID, or wipe it.</p>
-            <label>
-              Lookup User ID
-              <input
-                type="text"
-                value={lookupUserId}
-                onChange={(event) => setLookupUserId(event.target.value)}
-                placeholder="alex"
-              />
-            </label>
-            <div className="button-row">
-              <button type="button" onClick={handleLoadPlan}>
-                Load Plan
-              </button>
-              <button type="button" className="ghost" onClick={handleClearPlan}>
-                Clear Plan
-              </button>
-            </div>
-            <pre className="output">{savedPlan}</pre>
+            {settings.featureFlags.enableFreezerTags ? (
+              <div className="card">
+                <h3>Freezer Inventory</h3>
+                <p>Track frozen portions for future planning.</p>
+                <form onSubmit={addFreezerEntry} className="form-grid">
+                  <label>
+                    Item
+                    <input
+                      type="text"
+                      value={freezerInput.name}
+                      onChange={(event) =>
+                        setFreezerInput((current) => ({ ...current, name: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Portions
+                    <input
+                      type="number"
+                      min="1"
+                      value={freezerInput.portions}
+                      onChange={(event) =>
+                        setFreezerInput((current) => ({ ...current, portions: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <button type="submit" className="primary-button">
+                    Add to Freezer
+                  </button>
+                </form>
+                <ul className="inventory-list">
+                  {freezerItems.map((item, index) => (
+                    <li key={`${item.name}-${index}`}>
+                      <span>{item.name}</span>
+                      <span>{item.portions ? `${item.portions} portions` : ""}</span>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => setFreezerItems((items) => removeFreezerItem(items, index))}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {settings.featureFlags.enableBudgetOptimizer ? (
+              <div className="card">
+                <h3>Price Memory</h3>
+                <p>Store common prices for better estimates and swaps.</p>
+                <form onSubmit={addPriceEntry} className="form-grid">
+                  <label>
+                    Item
+                    <input
+                      type="text"
+                      value={priceInput.name}
+                      onChange={(event) =>
+                        setPriceInput((current) => ({ ...current, name: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Unit
+                    <input
+                      type="text"
+                      value={priceInput.unit}
+                      onChange={(event) =>
+                        setPriceInput((current) => ({ ...current, unit: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Price
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={priceInput.price}
+                      onChange={(event) =>
+                        setPriceInput((current) => ({ ...current, price: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <button type="submit" className="primary-button">
+                    Add/Update Price
+                  </button>
+                </form>
+                <ul className="inventory-list">
+                  {priceItems.map((item) => (
+                    <li key={item.name}>
+                      <span>{item.name}</span>
+                      <span>
+                        {item.price}/{item.unit}
+                      </span>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => setPriceItems((items) => removePriceItem(items, item.name))}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {settings.weeklyBudget ? (
+                  <div className="inline-note">Weekly budget: {settings.weeklyBudget}</div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {settings.featureFlags.enableLeftoverFatiguePrevention ? (
+              <div className="card">
+                <h3>Leftover Rotation</h3>
+                <p>Recent transformations (avoids repetition).</p>
+                <div className="history-list">
+                  {historyItems.length
+                    ? historyItems.map((item) => <span key={item}>{item}</span>)
+                    : "No history yet."}
+                </div>
+                <div className="history-meta">Tracking last {MAX_HISTORY} transformations.</div>
+              </div>
+            ) : null}
           </section>
-        </div>
+        ) : null}
       </main>
 
-      <footer>
-        Brutalist UI. No server required. Deploy via GitHub Pages.
-      </footer>
+      <nav className="bottom-nav" aria-label="Primary">
+        {Object.keys(VIEW_LABELS).map((view) => (
+          <button
+            key={view}
+            type="button"
+            className={activeView === view ? "nav-item active" : "nav-item"}
+            onClick={() => handleNav(view)}
+          >
+            <span className="nav-icon" aria-hidden="true" />
+            <span className="nav-label">{VIEW_LABELS[view]}</span>
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }
