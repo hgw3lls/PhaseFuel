@@ -1,5 +1,32 @@
-import { useMemo, useState } from "react";
-import { useSettings } from "./settings.jsx";
+import { useEffect, useMemo, useState } from "react";
+import { useSettings, DEFAULT_SETTINGS } from "./settings.jsx";
+import { calculateCyclePhase } from "./cycleCalculator.js";
+import { getMoonPhase } from "./moonPhase.js";
+import { validatePlannerResponse } from "./mealPlan.js";
+import { buildPlannerPrompt } from "./prompts/plannerPrompt.js";
+import { buildReadingPrompt } from "./prompts/readingPrompt.js";
+import {
+  adjustGroceryListForPantry,
+  loadPantry,
+  removePantryItem,
+  savePantry,
+  summarizePantry,
+  upsertPantryItem,
+} from "./modules/pantry.js";
+import {
+  addFreezerItem,
+  loadFreezer,
+  removeFreezerItem,
+  saveFreezer,
+} from "./modules/freezer.js";
+import {
+  loadPrices,
+  removePriceItem,
+  savePrices,
+  summarizePrices,
+  upsertPriceItem,
+} from "./modules/priceMemory.js";
+import { loadHistory, MAX_HISTORY, saveHistory, updateHistory } from "./modules/leftoverHistory.js";
 
 const STORAGE_KEY = "phasefuel_api_key";
 const PLAN_STORAGE_KEY = "phasefuel_meal_plans";
@@ -60,6 +87,30 @@ const buildPrompt = (cycleDay, symptoms, settings) => {
   ]
     .filter(Boolean)
     .join("\n");
+};
+
+const requestOpenAi = async ({ apiKey, temperature, messages }) => {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-3.5-turbo",
+      temperature,
+      messages,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const message = errorBody.error?.message || response.statusText;
+    throw new Error(message);
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content?.trim() || "";
 };
 
 const requestMealPlan = async ({ apiKey, cycleDay, symptoms, settings }) => {
@@ -157,7 +208,22 @@ export default function App() {
   const [lookupUserId, setLookupUserId] = useState("");
   const [savedPlan, setSavedPlan] = useState("No saved plan loaded.");
   const [isLoading, setIsLoading] = useState(false);
-  const { settings, updateSettings } = useSettings();
+  const [useWhatYouHaveOverride, setUseWhatYouHaveOverride] = useState(false);
+  const { settings, setSettings, updateSettings } = useSettings();
+
+  const plansByUser = useMemo(() => getStoredPlans(), [plannerData, savedPlan]);
+  const mealPlan = plannerData?.mealPlan || null;
+  const flowMap = useMemo(() => buildFlowMap(mealPlan), [mealPlan]);
+  const pantryFirst = settings.featureFlags.enableUseWhatYouHaveMode || useWhatYouHaveOverride;
+  const cycleInfo = useMemo(
+    () => calculateCyclePhase(new Date(), settings.cyclePreferences),
+    [settings.cyclePreferences]
+  );
+  const moonInfo = useMemo(() => getMoonPhase(new Date()), []);
+
+  useEffect(() => {
+    savePantry(pantryItems);
+  }, [pantryItems]);
 
   useEffect(() => {
     saveFreezer(freezerItems);
@@ -170,6 +236,44 @@ export default function App() {
   useEffect(() => {
     saveHistory(historyItems);
   }, [historyItems]);
+
+  const handleSettingsChange = (key, value) => {
+    updateSettings({ [key]: value });
+  };
+
+  const handleCyclePreferenceChange = (key, value) => {
+    updateSettings({
+      cyclePreferences: {
+        ...settings.cyclePreferences,
+        [key]: value,
+      },
+    });
+  };
+
+  const handleResetDefaults = () => {
+    setSettings(DEFAULT_SETTINGS);
+  };
+
+  const addPantryItem = (event) => {
+    event.preventDefault();
+    setPantryItems((items) => upsertPantryItem(items, pantryInput));
+    setPantryInput({ name: "", qty: "", unit: "", expiresOn: "" });
+  };
+
+  const addFreezerEntry = (event) => {
+    event.preventDefault();
+    if (!freezerInput.name?.trim()) {
+      return;
+    }
+    setFreezerItems((items) => addFreezerItem(items, freezerInput));
+    setFreezerInput({ name: "", portions: "" });
+  };
+
+  const addPriceEntry = (event) => {
+    event.preventDefault();
+    setPriceItems((items) => upsertPriceItem(items, priceInput));
+    setPriceInput({ name: "", unit: "", price: "" });
+  };
 
   const handleSaveKey = () => {
     if (!apiKey.trim()) {
@@ -215,6 +319,14 @@ export default function App() {
         cycleDay: cycleDay.trim(),
         symptoms: symptoms.trim(),
         settings,
+        cycleInfo,
+        moonInfo,
+        pantryItems: pantrySummary,
+        budgetNotes: budgetNotes.trim(),
+        priceMemory: priceSummary,
+        history: historyItems,
+        transformationLibrary: TRANSFORMATION_LIBRARY,
+        useWhatYouHaveMode,
       });
       setPlannerRaw(responsePlan || "No plan returned.");
 

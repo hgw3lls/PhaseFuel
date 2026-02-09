@@ -14,13 +14,31 @@ const SETTINGS_VERSION = 1;
  */
 
 /**
+ * @typedef {Object} CyclePreferences
+ * @property {string} lastPeriodStart
+ * @property {number} cycleLength
+ * @property {number} lutealLength
+ */
+
+/**
  * @typedef {Object} PhaseFuelSettings
  * @property {number} version
  * @property {FeatureFlags} featureFlags
  * @property {boolean} preferLeftoverLunch
  * @property {boolean} preferBatchCooking
  * @property {boolean} showOccultReadingLayer
+ * @property {CyclePreferences} cyclePreferences
+ * @property {string} batchDayOfWeek
+ * @property {number} batchTimeBudgetMin
+ * @property {number|null} weeklyBudget
+ * @property {string} costMode
  */
+
+const DEFAULT_CYCLE_PREFERENCES = {
+  lastPeriodStart: "",
+  cycleLength: 28,
+  lutealLength: 14,
+};
 
 /** @type {PhaseFuelSettings} */
 const DEFAULT_SETTINGS = {
@@ -36,9 +54,22 @@ const DEFAULT_SETTINGS = {
   preferLeftoverLunch: true,
   preferBatchCooking: true,
   showOccultReadingLayer: true,
+  cyclePreferences: DEFAULT_CYCLE_PREFERENCES,
+  batchDayOfWeek: "Sunday",
+  batchTimeBudgetMin: 90,
+  weeklyBudget: null,
+  costMode: "normal",
 };
 
 const coerceBoolean = (value, fallback) => (typeof value === "boolean" ? value : fallback);
+const coerceNumber = (value, fallback) =>
+  Number.isFinite(value) ? value : fallback;
+const coerceString = (value, fallback) => (typeof value === "string" ? value : fallback);
+const coerceNullableNumber = (value, fallback) =>
+  Number.isFinite(value) ? value : fallback;
+
+const COST_MODES = ["tight", "normal", "generous"];
+const coerceCostMode = (value) => (COST_MODES.includes(value) ? value : DEFAULT_SETTINGS.costMode);
 
 const normalizeFeatureFlags = (flags = {}) => ({
   enablePantryTracking: coerceBoolean(
@@ -64,6 +95,12 @@ const normalizeFeatureFlags = (flags = {}) => ({
   ),
 });
 
+const normalizeCyclePreferences = (prefs = {}) => ({
+  lastPeriodStart: coerceString(prefs.lastPeriodStart, DEFAULT_CYCLE_PREFERENCES.lastPeriodStart),
+  cycleLength: coerceNumber(prefs.cycleLength, DEFAULT_CYCLE_PREFERENCES.cycleLength),
+  lutealLength: coerceNumber(prefs.lutealLength, DEFAULT_CYCLE_PREFERENCES.lutealLength),
+});
+
 const normalizeSettings = (candidate) => {
   if (!candidate || typeof candidate !== "object") {
     return DEFAULT_SETTINGS;
@@ -87,6 +124,14 @@ const normalizeSettings = (candidate) => {
       candidate.showOccultReadingLayer,
       DEFAULT_SETTINGS.showOccultReadingLayer
     ),
+    cyclePreferences: normalizeCyclePreferences(candidate.cyclePreferences),
+    batchDayOfWeek: coerceString(candidate.batchDayOfWeek, DEFAULT_SETTINGS.batchDayOfWeek),
+    batchTimeBudgetMin: coerceNumber(
+      candidate.batchTimeBudgetMin,
+      DEFAULT_SETTINGS.batchTimeBudgetMin
+    ),
+    weeklyBudget: coerceNullableNumber(candidate.weeklyBudget, DEFAULT_SETTINGS.weeklyBudget),
+    costMode: coerceCostMode(candidate.costMode),
   };
 };
 
@@ -111,11 +156,15 @@ const mergeSettings = (current, patch) => {
   const nextFeatureFlags = patch?.featureFlags
     ? { ...current.featureFlags, ...patch.featureFlags }
     : current.featureFlags;
+  const nextCyclePreferences = patch?.cyclePreferences
+    ? { ...current.cyclePreferences, ...patch.cyclePreferences }
+    : current.cyclePreferences;
 
   return normalizeSettings({
     ...current,
     ...patch,
     featureFlags: nextFeatureFlags,
+    cyclePreferences: nextCyclePreferences,
   });
 };
 
