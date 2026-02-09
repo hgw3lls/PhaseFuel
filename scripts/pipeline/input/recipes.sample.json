@@ -1,0 +1,46 @@
+[
+  {
+    "id": "sample-overnight-oats",
+    "name": "Overnight oats with berries",
+    "mealType": "breakfast",
+    "ingredients": ["gluten-free oats", "almond milk", "chia seeds", "berries"],
+    "timeMinutes": 10,
+    "costLevel": "budget",
+    "servings": 2,
+    "leftovers": false,
+    "batchable": true
+  },
+  {
+    "id": "sample-salmon-bowl",
+    "name": "Omega-3 salmon grain bowl",
+    "mealType": "lunch",
+    "ingredients": ["salmon", "brown rice", "avocado", "spinach"],
+    "timeMinutes": 20,
+    "costLevel": "premium",
+    "servings": 2,
+    "leftovers": false,
+    "batchable": false
+  },
+  {
+    "id": "sample-ginger-tofu",
+    "name": "Ginger tofu stir-fry",
+    "mealType": "dinner",
+    "ingredients": ["tofu", "bell pepper", "snap peas", "ginger"],
+    "timeMinutes": 25,
+    "costLevel": "balanced",
+    "servings": 3,
+    "leftovers": true,
+    "batchable": true
+  },
+  {
+    "id": "sample-hummus",
+    "name": "Hummus with cucumbers",
+    "mealType": "snack",
+    "ingredients": ["hummus", "cucumber", "olive oil"],
+    "timeMinutes": 5,
+    "costLevel": "budget",
+    "servings": 1,
+    "leftovers": false,
+    "batchable": false
+  }
+]

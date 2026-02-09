@@ -1,0 +1,137 @@
+[
+  {
+    "token": "gluten-free oats",
+    "aliases": ["gluten free oats", "gf oats"],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "low",
+    "animal": "none",
+    "notes": "Certified GF oats"
+  },
+  {
+    "token": "almond milk",
+    "aliases": ["almondmilk"],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "low",
+    "animal": "none",
+    "notes": "placeholder"
+  },
+  {
+    "token": "chia seeds",
+    "aliases": ["chia"],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "low",
+    "animal": "none",
+    "notes": "placeholder"
+  },
+  {
+    "token": "berries",
+    "aliases": ["mixed berries"],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "low",
+    "animal": "none",
+    "notes": "placeholder"
+  },
+  {
+    "token": "salmon",
+    "aliases": [],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "low",
+    "animal": "fish",
+    "notes": "placeholder"
+  },
+  {
+    "token": "brown rice",
+    "aliases": [],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "low",
+    "animal": "none",
+    "notes": "placeholder"
+  },
+  {
+    "token": "avocado",
+    "aliases": [],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "caution",
+    "animal": "none",
+    "notes": "placeholder"
+  },
+  {
+    "token": "spinach",
+    "aliases": [],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "low",
+    "animal": "none",
+    "notes": "placeholder"
+  },
+  {
+    "token": "tofu",
+    "aliases": [],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "low",
+    "animal": "none",
+    "notes": "placeholder"
+  },
+  {
+    "token": "bell pepper",
+    "aliases": ["bellpepper"],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "low",
+    "animal": "none",
+    "notes": "placeholder"
+  },
+  {
+    "token": "snap peas",
+    "aliases": [],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "caution",
+    "animal": "none",
+    "notes": "placeholder"
+  },
+  {
+    "token": "ginger",
+    "aliases": [],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "low",
+    "animal": "none",
+    "notes": "placeholder"
+  },
+  {
+    "token": "hummus",
+    "aliases": [],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "caution",
+    "animal": "none",
+    "notes": "placeholder"
+  },
+  {
+    "token": "cucumber",
+    "aliases": [],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "low",
+    "animal": "none",
+    "notes": "placeholder"
+  },
+  {
+    "token": "olive oil",
+    "aliases": ["oliveoil"],
+    "count": 1,
+    "gluten": false,
+    "fodmap": "low",
+    "animal": "none",
+    "notes": "placeholder"
+  }
+]

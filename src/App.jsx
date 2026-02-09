@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSettings, DEFAULT_SETTINGS } from "./settings.jsx";
-import { calculateCyclePhase } from "./cycleCalculator.js";
-import { getMoonPhase } from "./moonPhase.js";
-import { normalizePlannerResponse, validatePlannerResponse } from "./mealPlan.js";
-import { buildPlannerPrompt } from "./prompts/plannerPrompt.js";
-import { buildReadingPrompt } from "./prompts/readingPrompt.js";
+import { estimatePhase } from "./lib/cycle.js";
+import { getMoonPhaseBucket } from "./lib/moon.js";
+import { computeSyncScore } from "./lib/sync.js";
+import {
+  loadIngredientCatalog,
+  loadIngredientCategories,
+  loadRecipes,
+} from "./lib/recipesStore.js";
+import { generateWeeklyPlan, swapMealInPlan } from "./lib/planner.js";
+import { buildFallbackNarrative, requestPlanNarrative } from "./lib/ai.js";
+import { validatePlan } from "./lib/validatePlan.js";
+import { compileAllowed } from "./lib/diet.ts";
 import {
   adjustGroceryListForPantry,
   loadPantry,
   removePantryItem,
   savePantry,
-  summarizePantry,
   upsertPantryItem,
 } from "./modules/pantry.js";
 import {
@@ -23,31 +29,19 @@ import {
   loadPrices,
   removePriceItem,
   savePrices,
-  summarizePrices,
   upsertPriceItem,
 } from "./modules/priceMemory.js";
-import { loadHistory, MAX_HISTORY, saveHistory, updateHistory } from "./modules/leftoverHistory.js";
+import { loadHistory, MAX_HISTORY, saveHistory } from "./modules/leftoverHistory.js";
 
-const STORAGE_KEY = "phasefuel_api_key";
 const PLAN_STORAGE_KEY = "phasefuel_meal_plans";
 const GROCERY_CHECK_KEY = "phasefuel_grocery_checks";
-
-const TRANSFORMATION_LIBRARY = [
-  "wrap",
-  "bowl",
-  "salad",
-  "soup remix",
-  "fried rice",
-  "quesadilla",
-  "pasta toss",
-  "frittata",
-];
 
 const VIEW_LABELS = {
   today: "Period",
   plan: "PLAN",
   grocery: "GROCERY",
   profile: "Profile",
+  privacy: "Privacy",
   settings: "Settings",
 };
 
@@ -75,145 +69,7 @@ const getStoredChecks = () => {
   return raw ? JSON.parse(raw) : {};
 };
 
-const buildPrompt = (cycleDay, symptoms, settings) => {
-  const preferences = [];
-  const features = [];
-
-  if (settings.preferLeftoverLunch) {
-    preferences.push("Prefer leftover-based lunches where possible.");
-  }
-  if (settings.preferBatchCooking) {
-    preferences.push("Favor batch cooking and reusable components.");
-  }
-  if (settings.showOccultReadingLayer) {
-    preferences.push("Include a short occult-themed reading layer for each day.");
-  }
-
-  if (settings.featureFlags.enablePantryTracking) {
-    features.push("Include pantry tracking prompts.");
-  }
-  if (settings.featureFlags.enableLeftoverFatiguePrevention) {
-    features.push("Rotate leftovers to prevent fatigue.");
-  }
-  if (settings.featureFlags.enableBatchDay) {
-    features.push("Designate a batch day prep block.");
-  }
-  if (settings.featureFlags.enableFreezerTags) {
-    features.push("Tag freezer-friendly items.");
-  }
-  if (settings.featureFlags.enableBudgetOptimizer) {
-    features.push("Optimize for budget-friendly ingredients.");
-  }
-  if (settings.featureFlags.enableUseWhatYouHaveMode) {
-    features.push("Prioritize use-what-you-have mode.");
-  }
-
-  return [
-    `Generate a healthy meal plan for cycle day ${cycleDay} with symptoms: ${symptoms}.`,
-    preferences.length ? `Preferences: ${preferences.join(" ")}` : "",
-    features.length ? `Advanced features: ${features.join(" ")}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-};
-
-const requestOpenAi = async ({ apiKey, temperature, messages }) => {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-3.5-turbo",
-      temperature,
-      messages,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    const message = errorBody.error?.message || response.statusText;
-    throw new Error(message);
-  }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content?.trim() || "";
-};
-
-const requestMealPlan = async ({ apiKey, cycleDay, symptoms, settings }) => {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-3.5-turbo",
-      temperature: 0.7,
-      messages: [
-        {
-          role: "user",
-          content: buildPrompt(cycleDay, symptoms, settings),
-        },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    const message = errorBody.error?.message || response.statusText;
-    throw new Error(message);
-  }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content?.trim() || "";
-};
-
-const requestPlanner = async (params) =>
-  requestOpenAi({
-    apiKey: params.apiKey,
-    temperature: 0.4,
-    messages: [
-      {
-        role: "user",
-        content: buildPlannerPrompt(params),
-      },
-    ],
-  });
-
-const requestReading = async ({ apiKey, plannerJson, cycleInfo, moonInfo }) =>
-  requestOpenAi({
-    apiKey,
-    temperature: 0.7,
-    messages: [
-      {
-        role: "user",
-        content: buildReadingPrompt({ plannerJson, cycleInfo, moonInfo }),
-      },
-    ],
-  });
-
-const formatFlowLabel = (day) => `Day ${day}`;
-
-const buildFlowMap = (plan) => {
-  const map = new Map();
-  if (!plan?.leftoversGraph) {
-    return map;
-  }
-  plan.leftoversGraph.forEach((link) => {
-    const fromDay = link.fromDayIndex ?? link.fromDay;
-    const toDay = link.toDayIndex ?? link.toDay;
-    if (typeof fromDay === "number" && typeof toDay === "number") {
-      map.set(fromDay, toDay);
-    }
-  });
-  return map;
-};
-
 const formatPhase = (value) => (value ? `${value[0].toUpperCase()}${value.slice(1)}` : "Unknown");
-
-const formatMoon = (moonInfo) => moonInfo?.name || "New Moon";
 
 const buildWeekdayLabels = (count) => {
   const today = new Date();
@@ -234,11 +90,40 @@ const groupGroceries = (items) =>
     return acc;
   }, {});
 
+const buildGroceryList = (plan, ingredientCategories) => {
+  const counts = new Map();
+  const categoryMap = new Map();
+
+  Object.entries(ingredientCategories || {}).forEach(([category, items]) => {
+    items.forEach((item) => {
+      categoryMap.set(item.toLowerCase(), category);
+    });
+  });
+
+  plan?.days?.forEach((day) => {
+    Object.values(day.meals || {}).forEach((meal) => {
+      meal.ingredients.forEach((ingredient) => {
+        const key = ingredient.toLowerCase();
+        counts.set(key, (counts.get(key) || 0) + 1);
+      });
+    });
+  });
+
+  return Array.from(counts.entries()).map(([name, count]) => ({
+    name,
+    qty: count > 1 ? String(count) : "",
+    unit: "",
+    category: categoryMap.get(name.toLowerCase()) || "Other",
+  }));
+};
+
 export default function App() {
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem(STORAGE_KEY) || "");
   const [userId, setUserId] = useState("");
   const [cycleDay, setCycleDay] = useState("");
   const [symptoms, setSymptoms] = useState("");
+  const [recipes] = useState(() => loadRecipes());
+  const [ingredientCatalog] = useState(() => loadIngredientCatalog());
+  const [ingredientCategories] = useState(() => loadIngredientCategories());
   const [pantryItems, setPantryItems] = useState(() =>
     typeof loadPantry === "function" ? loadPantry() : []
   );
@@ -251,13 +136,12 @@ export default function App() {
   const [budgetNotes, setBudgetNotes] = useState("");
   const [generationState, setGenerationState] = useState("idle");
   const [status, setStatus] = useState("Ready.");
-  const [plannerRaw, setPlannerRaw] = useState("No plan generated yet.");
-  const [plannerData, setPlannerData] = useState(null);
+  const [weeklyPlan, setWeeklyPlan] = useState(null);
   const [plannerError, setPlannerError] = useState("");
+  const [planNarrative, setPlanNarrative] = useState(null);
   const [groceryList, setGroceryList] = useState([]);
   const [prepSteps, setPrepSteps] = useState([]);
   const [estimatedCost, setEstimatedCost] = useState(null);
-  const [occultReading, setOccultReading] = useState("No occult reading yet.");
   const [lookupUserId, setLookupUserId] = useState("");
   const [savedPlan, setSavedPlan] = useState("No saved plan loaded.");
   const [isLoading, setIsLoading] = useState(false);
@@ -265,7 +149,6 @@ export default function App() {
   const [activeView, setActiveView] = useState("today");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activePlanDay, setActivePlanDay] = useState(null);
-  const [isDinnerExpanded, setIsDinnerExpanded] = useState(false);
   const [planDays, setPlanDays] = useState(7);
   const [dietaryPreferences, setDietaryPreferences] = useState("");
   const [cuisinePreferences, setCuisinePreferences] = useState("");
@@ -273,15 +156,17 @@ export default function App() {
   const [groceryChecks, setGroceryChecks] = useState(() => getStoredChecks());
   const { settings, setSettings, updateSettings } = useSettings();
 
-  const plansByUser = useMemo(() => getStoredPlans(), [plannerData, savedPlan]);
-  const mealPlan = plannerData?.mealPlan || null;
-  const flowMap = useMemo(() => buildFlowMap(mealPlan), [mealPlan]);
+  const plansByUser = useMemo(() => getStoredPlans(), [weeklyPlan, savedPlan]);
   const pantryFirst = settings.featureFlags.enableUseWhatYouHaveMode || useWhatYouHaveOverride;
   const cycleInfo = useMemo(
-    () => calculateCyclePhase(new Date(), settings.cyclePreferences),
-    [settings.cyclePreferences]
+    () => estimatePhase(new Date().toISOString(), settings.cyclePreferences, settings.cycleMode),
+    [settings.cyclePreferences, settings.cycleMode]
   );
-  const moonInfo = useMemo(() => getMoonPhase(new Date()), []);
+  const moonInfo = useMemo(() => getMoonPhaseBucket(new Date()), []);
+  const syncScore = useMemo(
+    () => computeSyncScore(cycleInfo.phase, Math.floor((moonInfo.age / 29.53) * 8)),
+    [cycleInfo.phase, moonInfo.age]
+  );
 
   useEffect(() => {
     savePantry(pantryItems);
@@ -304,14 +189,11 @@ export default function App() {
   }, [groceryChecks]);
 
   useEffect(() => {
-    if (mealPlan?.days?.length) {
-      setActivePlanDay((current) => current ?? mealPlan.days[0].day);
+    if (weeklyPlan?.days?.length) {
+      setActivePlanDay((current) => (current ?? 0));
     }
-  }, [mealPlan]);
+  }, [weeklyPlan]);
 
-  useEffect(() => {
-    setIsDinnerExpanded(false);
-  }, [activePlanDay]);
 
   const handleSettingsChange = (key, value) => {
     updateSettings({ [key]: value });
@@ -351,14 +233,34 @@ export default function App() {
     setPriceInput({ name: "", unit: "", price: "" });
   };
 
-  const handleSaveKey = () => {
-    if (!apiKey.trim()) {
-      setStatus("Enter an API key before saving.");
-      return;
-    }
-    localStorage.setItem(STORAGE_KEY, apiKey.trim());
-    setStatus("API key saved locally.");
+  const buildProfile = () => {
+    const avoidList = foodAvoidances
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const preferTags = dietaryPreferences
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+
+    return {
+      id: userId.trim(),
+      dietPattern: settings.dietPattern,
+      glutenFree: settings.glutenFree,
+      lowFodmapMode: settings.lowFodmapMode,
+      avoidIngredients: avoidList,
+      preferTags,
+      timeBudgetMin: settings.timeBudgetMin,
+      budgetLevel: settings.costMode,
+    };
   };
+
+  const buildPlanSettings = () => ({
+    preferLeftoverLunch: settings.preferLeftoverLunch,
+    includeSnacks: settings.includeSnacks,
+    maxRepeatsPerWeek: settings.maxRepeatsPerWeek,
+    ingredientCatalog,
+  });
 
   const handleUseWhatYouHave = () => {
     if (settings.featureFlags.enablePantryTracking && pantryItems.length < 5) {
@@ -371,110 +273,97 @@ export default function App() {
   };
 
   const generatePlan = async () => {
-    if (!apiKey.trim()) {
-      setStatus("Please enter your OpenAI API key.");
-      return;
-    }
     if (!userId.trim()) {
       setStatus("Please enter a user ID.");
       return;
     }
     setIsLoading(true);
     setGenerationState("generating");
-    setStatus("Generating meal plan...");
+    setStatus("Generating deterministic plan...");
     setPlannerError("");
 
     const useWhatYouHaveMode =
       settings.featureFlags.enableUseWhatYouHaveMode || useWhatYouHaveOverride;
-    const pantrySummary = summarizePantry(pantryItems);
-    const priceSummary = summarizePrices(priceItems);
 
     try {
-      const responsePlan = await requestPlanner({
-        apiKey: apiKey.trim(),
-        cycleDay: cycleDay.trim(),
-        symptoms: symptoms.trim(),
-        planDays,
-        dietaryPreferences: dietaryPreferences.trim(),
-        cuisinePreferences: cuisinePreferences.trim(),
-        foodAvoidances: foodAvoidances.trim(),
-        settings,
-        cycleInfo,
-        moonInfo,
-        pantryItems: pantrySummary,
-        budgetNotes: budgetNotes.trim(),
-        priceMemory: priceSummary,
-        history: historyItems,
-        transformationLibrary: TRANSFORMATION_LIBRARY,
-        useWhatYouHaveMode,
+      if (!cycleDay || !symptoms.trim()) {
+        setStatus("Enter your cycle day and symptoms to generate a plan.");
+        setGenerationState("error");
+        return;
+      }
+
+      const symptomList = symptoms
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const profile = buildProfile();
+      const planSettings = buildPlanSettings();
+
+      let nextPlan = generateWeeklyPlan({
+        recipes,
+        profile,
+        phase: cycleInfo.phase,
+        symptoms: symptomList,
+        settings: planSettings,
+        days: planDays,
       });
-      setPlannerRaw(responsePlan || "No plan returned.");
 
-      let parsedPlan;
-      try {
-        parsedPlan = JSON.parse(responsePlan);
-      } catch (error) {
-        setPlannerData(null);
-        setGroceryList([]);
-        setPrepSteps([]);
-        setEstimatedCost(null);
-        setPlannerError("The planner returned invalid JSON. Please retry generation.");
-        setStatus("Meal plan failed validation.");
-        setGenerationState("error");
-        return;
+      const { forbiddenTokens } = compileAllowed(
+        profile,
+        ingredientCatalog,
+        settings.lowFodmapMode
+      );
+      const validation = validatePlan(nextPlan, forbiddenTokens, ingredientCatalog);
+      if (!validation.valid) {
+        nextPlan = generateWeeklyPlan({
+          recipes,
+          profile,
+          phase: cycleInfo.phase,
+          symptoms: symptomList,
+          settings: { ...planSettings, includeSnacks: false },
+          days: planDays,
+        });
       }
 
-      const normalizedPlan = normalizePlannerResponse(parsedPlan);
-      const validation = validatePlannerResponse(normalizedPlan);
-      if (!validation.ok) {
-        setPlannerData(null);
-        setGroceryList([]);
-        setPrepSteps([]);
-        setEstimatedCost(null);
-        setPlannerError(`Plan schema errors: ${validation.errors.join(" ")}`);
-        setStatus("Meal plan failed validation.");
-        setGenerationState("error");
-        return;
-      }
+      const nextGrocery = buildGroceryList(nextPlan, ingredientCategories);
+      const pantryAdjusted = useWhatYouHaveMode
+        ? adjustGroceryListForPantry(nextGrocery, pantryItems)
+        : nextGrocery;
 
-      const nextGrocery = useWhatYouHaveMode
-        ? adjustGroceryListForPantry(normalizedPlan.groceryList.items, pantryItems)
-        : normalizedPlan.groceryList.items;
-
-      setPlannerData(normalizedPlan);
-      setGroceryList(nextGrocery);
-      setPrepSteps(normalizedPlan.prepSteps);
-      setEstimatedCost(normalizedPlan.estimatedCost || null);
+      setWeeklyPlan(nextPlan);
+      setGroceryList(pantryAdjusted);
+      setPrepSteps([]);
+      setEstimatedCost(null);
       setGenerationState("success");
 
-      if (settings.featureFlags.enableLeftoverFatiguePrevention) {
-        const transformations = parsedPlan.mealPlan.days.flatMap(
-          (day) => day.meals.dinner.transformationOptions || []
-        );
-        setHistoryItems((current) => updateHistory(current, transformations));
-      }
+      const profileSummary = `${settings.dietPattern} diet, gluten-free: ${
+        settings.glutenFree ? "yes" : "no"
+      }, low-FODMAP: ${settings.lowFodmapMode}`;
+      const { allowedTokens } = compileAllowed(
+        profile,
+        ingredientCatalog,
+        settings.lowFodmapMode
+      );
+      const fallbackNarrative = buildFallbackNarrative({
+        weeklyPlan: nextPlan,
+        profileSummary,
+      });
 
-      let occultText = null;
-      if (settings.showOccultReadingLayer) {
-        try {
-          occultText = await requestReading({
-            apiKey: apiKey.trim(),
-            plannerJson: JSON.stringify(parsedPlan, null, 2),
-            cycleInfo,
-            moonInfo,
-          });
-        } catch (error) {
-          occultText = "Occult reading unavailable.";
-        }
-        setOccultReading(occultText || "No occult reading returned.");
-      }
+      const narrative = await requestPlanNarrative({
+        profileSummary,
+        weekStartISO: nextPlan.startDateISO || nextPlan.weekStartISO || "",
+        weeklyPlanJson: nextPlan,
+        allowedTokens: Array.from(allowedTokens),
+        fallback: fallbackNarrative,
+      });
+      setPlanNarrative(narrative);
 
       const updatedPlans = {
         ...plansByUser,
         [userId.trim()]: {
           cycle_day: Number(cycleDay),
           symptoms: symptoms.trim(),
-          meal_plan: responsePlan,
+          weekly_plan: nextPlan,
           settings_snapshot: settings,
         },
       };
@@ -555,9 +444,6 @@ export default function App() {
     setDrawerOpen(false);
   };
 
-  const toggleDinnerExpand = () => {
-    setIsDinnerExpanded((current) => !current);
-  };
 
   const handleAddDinnerToGroceries = () => {
     const ingredients = activeDayData?.meals?.dinner?.ingredients || [];
@@ -585,6 +471,47 @@ export default function App() {
     });
   };
 
+  const handleSwapMeal = (dayIndex, mealType) => {
+    if (!weeklyPlan) {
+      setStatus("Generate a plan before swapping meals.");
+      return;
+    }
+    const symptomList = symptoms
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const nextPlan = swapMealInPlan({
+      plan: weeklyPlan,
+      recipes,
+      profile: buildProfile(),
+      phase: cycleInfo.phase,
+      symptoms: symptomList,
+      settings: buildPlanSettings(),
+      dayIndex,
+      mealType,
+    });
+    setWeeklyPlan(nextPlan);
+    setGroceryList(buildGroceryList(nextPlan, ingredientCategories));
+    setStatus(`Swapped ${mealType} for day ${dayIndex + 1}.`);
+  };
+
+  const handleExportPlan = () => {
+    if (!weeklyPlan) {
+      setStatus("Generate a plan before exporting.");
+      return;
+    }
+    const blob = new Blob([JSON.stringify(weeklyPlan, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `phasefuel-plan-${weeklyPlan.startDateISO || "week"}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setStatus("Plan exported.");
+  };
+
   const coreSettings = [
     {
       key: "preferLeftoverLunch",
@@ -603,12 +530,11 @@ export default function App() {
         updateSettings({ preferBatchCooking: !settings.preferBatchCooking }),
     },
     {
-      key: "showOccultReadingLayer",
-      label: "Show occult reading layer",
-      description: "Add the mystical narrative overlay in outputs.",
-      value: settings.showOccultReadingLayer,
-      onChange: () =>
-        updateSettings({ showOccultReadingLayer: !settings.showOccultReadingLayer }),
+      key: "includeSnacks",
+      label: "Include snacks",
+      description: "Add optional snack slots to the week.",
+      value: settings.includeSnacks,
+      onChange: () => updateSettings({ includeSnacks: !settings.includeSnacks }),
     },
   ];
 
@@ -646,38 +572,22 @@ export default function App() {
   ];
 
   const fallbackDayCount = planDays || 7;
-  const weekdayLabels = buildWeekdayLabels(mealPlan?.days?.length || fallbackDayCount);
+  const weekdayLabels = buildWeekdayLabels(weeklyPlan?.days?.length || fallbackDayCount);
   const dayChips = (
-    mealPlan?.days ||
-    Array.from({ length: fallbackDayCount }, (_, index) => ({ day: index + 1 }))
-  )
-    .map((day, index) => ({
-      label: weekdayLabels[index] || `Day ${day.day}`,
-      value: day.day,
-    }));
+    weeklyPlan?.days ||
+    Array.from({ length: fallbackDayCount }, (_, index) => ({
+      dateISO: new Date(Date.now() + index * 86400000).toISOString().slice(0, 10),
+    }))
+  ).map((day, index) => ({
+    label: weekdayLabels[index] || day.dateISO,
+    value: index,
+  }));
 
-  const activeDayData = mealPlan?.days?.find((day) => day.day === activePlanDay) || null;
-  const leftoverCards = mealPlan?.leftoversGraph?.length
-    ? mealPlan.leftoversGraph.map((link) => {
-        const fromDay = link.fromDayIndex ?? link.fromDay;
-        const toDay = link.toDayIndex ?? link.toDay;
-        const from = mealPlan.days.find((day) => day.day === fromDay);
-        const transformList = from?.meals?.dinner?.transformationOptions || [];
-        return {
-          key: `${fromDay}-${toDay}`,
-          title: "DINNER • LUNCH",
-          transform: transformList.length ? transformList.join(" / ") : "Bowl / Wrap / Salad",
-          time: "5 min",
-        };
-      })
-    : [
-        { key: "placeholder-1", title: "DINNER • LUNCH", transform: "Bowl / Wrap / Salad", time: "5 min" },
-        { key: "placeholder-2", title: "DINNER • LUNCH", transform: "Soup Remix / Fried Rice", time: "10 min" },
-      ];
+  const activeDayData = weeklyPlan?.days?.[activePlanDay] || null;
 
   const groceryGroups = groupGroceries(groceryList);
   const groceryCount = groceryList.length;
-  const groceryTotals = plannerData?.groceryList?.totals || null;
+  const groceryTotals = null;
 
   return (
     <div className="app-shell">
@@ -729,7 +639,25 @@ export default function App() {
             <div className="hero-block">
               <h1>Today</h1>
               <div className="info-pill">
-                Day {(cycleInfo.dayInCycle ?? cycleDay) || "--"} • {formatPhase(cycleInfo.phase)} • {formatMoon(moonInfo)}
+                Day {(cycleDay || "--")} • {formatPhase(cycleInfo.phase)} • {moonInfo.phase}
+              </div>
+              <div className="rhythm-badge">
+                <div className="rhythm-title">Rhythms</div>
+                <div className="rhythm-row">
+                  <span>Cycle:</span>
+                  <strong>
+                    {formatPhase(cycleInfo.phase)} ({Math.round(cycleInfo.confidence * 100)}%)
+                  </strong>
+                </div>
+                <div className="rhythm-row">
+                  <span>Moon:</span>
+                  <strong>{moonInfo.phase}</strong>
+                </div>
+                <div className="rhythm-row">
+                  <span>Sync:</span>
+                  <strong>{syncScore}</strong>
+                </div>
+                <div className="rhythm-disclaimer">Symbolic cadence only • not medical advice.</div>
               </div>
               <p className="hero-line">Cycle-aware meals. Period.</p>
               <div className="stat-lines">
@@ -849,15 +777,29 @@ export default function App() {
               {plannerError ? <div className="alert">{plannerError}</div> : null}
             </div>
             <details className="accordion" open={false}>
-              <summary>READING</summary>
+              <summary>PLAN NARRATIVE</summary>
               <div className="accordion-body">
-                {settings.showOccultReadingLayer ? (
-                  <pre>{occultReading}</pre>
-                ) : (
-                  <p>Enable the occult layer in Settings to unlock today&apos;s reading.</p>
-                )}
+                <p>{planNarrative?.summaryText || "Generate a plan to see the narrative summary."}</p>
+                {planNarrative?.groceryByAisle?.length ? (
+                  <div className="narrative-grocery">
+                    {planNarrative.groceryByAisle.map((aisle) => (
+                      <div key={aisle.aisle}>
+                        <strong>{aisle.aisle}</strong>
+                        <ul>
+                          {aisle.items.map((item) => (
+                            <li key={`${aisle.aisle}-${item}`}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </details>
+            <div className="disclaimer-note">
+              Not medical advice. Low-FODMAP guidance is portion-sensitive and this planner uses a
+              conservative heuristic.
+            </div>
           </section>
         ) : null}
 
@@ -865,6 +807,9 @@ export default function App() {
           <section className="screen">
             <div className="section-header">
               <h2>PLAN</h2>
+              <button type="button" className="ghost" onClick={handleExportPlan}>
+                Export JSON
+              </button>
               <div className="chip-row">
                 {dayChips.map((chip) => (
                   <button
@@ -879,136 +824,83 @@ export default function App() {
                 ))}
               </div>
             </div>
-            <div className="plan-section">
-              <h3>{activeDayData ? `Day ${activeDayData.day}` : "Wednesday"}</h3>
-              <details className="accordion">
-                <summary>Breakfast</summary>
-                <div className="accordion-body">
-                  {activeDayData?.meals?.breakfast ? (
-                    <div>
-                      <strong>{activeDayData.meals.breakfast.name}</strong>
-                      <p>{activeDayData.meals.breakfast.ingredients.join(", ")}</p>
-                    </div>
-                  ) : (
-                    <p>Steel-cut oats with berries and almond butter.</p>
-                  )}
+            {weeklyPlan ? (
+              <>
+                <div className="calendar-grid">
+                  {weeklyPlan.days.map((day, index) => (
+                    <button
+                      type="button"
+                      key={day.dateISO}
+                      className={activePlanDay === index ? "calendar-card active" : "calendar-card"}
+                      onClick={() => setActivePlanDay(index)}
+                    >
+                      <div className="calendar-header">{weekdayLabels[index]}</div>
+                      <div className="calendar-date">{day.dateISO}</div>
+                      <div className="calendar-meal">{day.meals.breakfast?.name}</div>
+                      <div className="calendar-meal">{day.meals.lunch?.name}</div>
+                      <div className="calendar-meal">{day.meals.dinner?.name}</div>
+                    </button>
+                  ))}
                 </div>
-              </details>
-              <details className="accordion">
-                <summary>Lunch</summary>
-                <div className="accordion-body">
-                  {activeDayData?.meals?.lunch ? (
-                    <div>
-                      <strong>{activeDayData.meals.lunch.name}</strong>
-                      <p>{activeDayData.meals.lunch.ingredients.join(", ")}</p>
-                    </div>
-                  ) : (
-                    <p>Leftover roasted veg bowl with tahini drizzle.</p>
-                  )}
-                </div>
-              </details>
-            </div>
 
-            <div className="leftover-stack">
-              {leftoverCards.map((card) => (
-                <div className="transform-card" key={card.key}>
-                  <span className="card-kicker">{card.title}</span>
-                  <div className="card-main">Transform: {card.transform}</div>
-                  <div className="card-meta">{card.time}</div>
-                </div>
-              ))}
-            </div>
-
-            <div className="plan-section">
-              <h3>Thursday</h3>
-              <div className="meal-card">
-                <div>
-                  <h4>{activeDayData?.meals?.dinner?.name || "Roasted Veggie Tray Bake"}</h4>
-                  <div className="tag-row">
-                    <span className="tag">{formatPhase(cycleInfo.phase)} phase</span>
-                    <span className="tag">batch-tag</span>
-                  </div>
-                  <p>
-                    {activeDayData?.meals?.dinner?.ingredients?.join(", ") ||
-                      "Broccoli, sweet potato, chickpeas, olive oil."}
-                  </p>
-                  {isDinnerExpanded ? (
-                    <div className="expanded-details">
-                      <div>Servings cooked: {activeDayData?.meals?.dinner?.servingsCooked ?? 4}</div>
-                      <div>Servings dinner: {activeDayData?.meals?.dinner?.servingsDinner ?? 2}</div>
-                      <div>
-                        Leftovers: {activeDayData?.meals?.dinner?.leftoverPortions ?? 2} portion(s)
-                      </div>
-                      <div>Batch tag: {activeDayData?.meals?.dinner?.batchTag ?? "batch-tag"}</div>
-                      <div>
-                        Transformations:{" "}
-                        {activeDayData?.meals?.dinner?.transformationOptions?.join(", ") ||
-                          "Wrap, Bowl, Salad"}
-                      </div>
-                      <div>
-                        Freezer friendly:{" "}
-                        {activeDayData?.meals?.dinner?.freezeFriendly ? "Yes" : "No"}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="card-actions">
-                  <button type="button" className="ghost" onClick={toggleDinnerExpand}>
-                    {isDinnerExpanded ? "Collapse" : "Expand"}
-                  </button>
-                  <button type="button" className="ghost">
-                    Swap
-                  </button>
-                  <button type="button" className="ghost">
-                    Mark Cooked
-                  </button>
-                  <button type="button" className="ghost" onClick={handleAddDinnerToGroceries}>
-                    Add to Grocery
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {mealPlan ? (
-              <div className="plan-flow">
-                <h3>Leftover Flow</h3>
-                <div className="flow-list">
-                  {mealPlan.days.map((day) => {
-                    const nextDay = flowMap.get(day.day);
-                    return (
-                      <div className="flow-card" key={day.day}>
-                        <div className="flow-header">{formatFlowLabel(day.day)}</div>
-                        <div className="flow-row">
-                          <div>
-                            <span className="flow-title">Dinner</span>
-                            <div>{day.meals.dinner.name}</div>
-                            <div className="flow-meta">Batch tag: {day.meals.dinner.batchTag}</div>
-                            <div className="flow-meta">
-                              Leftovers: {day.meals.dinner.leftoverPortions} portion(s)
-                            </div>
-                            <div className="flow-meta">
-                              Transformations: {day.meals.dinner.transformationOptions.join(", ")}
-                            </div>
-                          </div>
-                          <div className="flow-arrow">→</div>
-                          <div>
-                            <span className="flow-title">Lunch</span>
+                <div className="plan-section">
+                  <h3>{activeDayData ? `Day ${activePlanDay + 1}` : "Select a day"}</h3>
+                  {activeDayData ? (
+                    ["breakfast", "lunch", "dinner", "snack"]
+                      .filter((mealType) => activeDayData.meals[mealType])
+                      .map((mealType) => {
+                        const meal = activeDayData.meals[mealType];
+                        return (
+                          <div className="meal-card" key={mealType}>
                             <div>
-                              {nextDay ? `${formatFlowLabel(nextDay)} lunch` : "No linked lunch"}
-                            </div>
-                            {nextDay ? (
-                              <div className="flow-meta">
-                                {mealPlan.days.find((planDay) => planDay.day === nextDay)?.meals
-                                  .lunch.name}
+                              <h4>{meal.name}</h4>
+                              <div className="tag-row">
+                                <span className="tag">{mealType}</span>
+                                <span className="tag">{formatPhase(cycleInfo.phase)} phase</span>
                               </div>
-                            ) : null}
+                              <p>{meal.ingredients.join(", ")}</p>
+                            </div>
+                            <div className="card-actions">
+                              <button
+                                type="button"
+                                className="ghost"
+                                onClick={() => handleSwapMeal(activePlanDay, mealType)}
+                              >
+                                Swap meal
+                              </button>
+                              {mealType === "dinner" ? (
+                                <button
+                                  type="button"
+                                  className="ghost"
+                                  onClick={handleAddDinnerToGroceries}
+                                >
+                                  Add to Grocery
+                                </button>
+                              ) : null}
+                            </div>
                           </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                        );
+                      })
+                  ) : (
+                    <p>Select a day to view details.</p>
+                  )}
                 </div>
-              </div>
+
+                <div className="why-panel">
+                  <h3>Why this plan?</h3>
+                  {activeDayData ? (
+                    <ul>
+                      {Object.values(activeDayData.meals).flatMap((meal) =>
+                        (meal.rationale || []).map((reason, index) => (
+                          <li key={`${meal.recipeId}-${index}`}>{reason}</li>
+                        ))
+                      )}
+                    </ul>
+                  ) : (
+                    <p>No rationale yet. Generate a plan to see details.</p>
+                  )}
+                </div>
+              </>
             ) : (
               <div className="empty-state">
                 <p>No plan generated yet. Head to Today and generate a plan.</p>
@@ -1090,23 +982,14 @@ export default function App() {
           <section className="screen">
             <div className="section-header">
               <h2>Profile</h2>
-              <p className="muted">Manage your API vault and saved plan archive.</p>
+              <p className="muted">Manage saved plan archive and privacy settings.</p>
             </div>
             <div className="card">
-              <h3>API Vault</h3>
-              <p>Paste your OpenAI API key. It never leaves this browser.</p>
-              <label>
-                API Key
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  placeholder="sk-..."
-                />
-              </label>
-              <button type="button" className="primary-button" onClick={handleSaveKey}>
-                Save Key
-              </button>
+              <h3>Privacy</h3>
+              <p>
+                PhaseFuel never stores secret keys in the browser. AI narration runs through the
+                backend proxy with rate limits.
+              </p>
             </div>
             <div className="card">
               <h3>Saved Plans</h3>
@@ -1129,6 +1012,37 @@ export default function App() {
                 </button>
               </div>
               <pre className="output">{savedPlan}</pre>
+            </div>
+          </section>
+        ) : null}
+
+        {activeView === "privacy" ? (
+          <section className="screen">
+            <div className="section-header">
+              <h2>Privacy</h2>
+              <p className="muted">Data handling, storage, and disclaimers.</p>
+            </div>
+            <div className="card">
+              <h3>Stored locally</h3>
+              <ul>
+                <li>Meal plans and grocery checkmarks saved in your browser storage.</li>
+                <li>Pantry, freezer, and price memory items if enabled.</li>
+                <li>Settings such as cycle preferences and diet constraints.</li>
+              </ul>
+            </div>
+            <div className="card">
+              <h3>Sent to server</h3>
+              <p>
+                The narrative endpoint receives only the WeeklyPlan JSON plus a short profile
+                summary and allowed ingredient tokens to format copy.
+              </p>
+            </div>
+            <div className="card">
+              <h3>Disclaimers</h3>
+              <p>
+                PhaseFuel is not medical advice. Low-FODMAP guidance is portion-sensitive and this
+                planner uses conservative heuristics.
+              </p>
             </div>
           </section>
         ) : null}
@@ -1167,6 +1081,16 @@ export default function App() {
                   />
                 </label>
                 <label>
+                  Last Ovulation (optional)
+                  <input
+                    type="date"
+                    value={settings.cyclePreferences.lastOvulation}
+                    onChange={(event) =>
+                      handleCyclePreferenceChange("lastOvulation", event.target.value)
+                    }
+                  />
+                </label>
+                <label>
                   Cycle Length (days)
                   <input
                     type="number"
@@ -1196,6 +1120,33 @@ export default function App() {
                     }
                   />
                 </label>
+                <label>
+                  Period Length (days)
+                  <input
+                    type="number"
+                    min="3"
+                    max="10"
+                    value={settings.cyclePreferences.periodLength}
+                    onChange={(event) =>
+                      handleCyclePreferenceChange(
+                        "periodLength",
+                        Number.parseInt(event.target.value || "0", 10)
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Cycle Mode
+                  <select
+                    value={settings.cycleMode}
+                    onChange={(event) => handleSettingsChange("cycleMode", event.target.value)}
+                  >
+                    <option value="period_based">Period-based</option>
+                    <option value="ovulation_aware">Ovulation-aware</option>
+                    <option value="moon_only">Moon-only</option>
+                    <option value="symptom_only">Symptom-only</option>
+                  </select>
+                </label>
               </div>
             </div>
             <div className="card">
@@ -1224,6 +1175,20 @@ export default function App() {
                   />
                 </label>
                 <label>
+                  Time Budget (min)
+                  <input
+                    type="number"
+                    min="10"
+                    value={settings.timeBudgetMin}
+                    onChange={(event) =>
+                      handleSettingsChange(
+                        "timeBudgetMin",
+                        Number.parseInt(event.target.value || "0", 10)
+                      )
+                    }
+                  />
+                </label>
+                <label>
                   Weekly Budget
                   <input
                     type="number"
@@ -1246,6 +1211,57 @@ export default function App() {
                     <option value="tight">Tight</option>
                     <option value="normal">Normal</option>
                     <option value="generous">Generous</option>
+                  </select>
+                </label>
+                <label>
+                  Max Repeats Per Week
+                  <input
+                    type="number"
+                    min="1"
+                    max="4"
+                    value={settings.maxRepeatsPerWeek}
+                    onChange={(event) =>
+                      handleSettingsChange(
+                        "maxRepeatsPerWeek",
+                        Number.parseInt(event.target.value || "0", 10)
+                      )
+                    }
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="card">
+              <h3>Diet & Constraints</h3>
+              <div className="cycle-grid">
+                <label>
+                  Diet Pattern
+                  <select
+                    value={settings.dietPattern}
+                    onChange={(event) => handleSettingsChange("dietPattern", event.target.value)}
+                  >
+                    <option value="omnivore">Omnivore</option>
+                    <option value="pescatarian">Pescatarian</option>
+                    <option value="vegetarian">Vegetarian</option>
+                    <option value="vegan">Vegan</option>
+                  </select>
+                </label>
+                <label>
+                  Gluten-free
+                  <input
+                    type="checkbox"
+                    checked={settings.glutenFree}
+                    onChange={() => handleSettingsChange("glutenFree", !settings.glutenFree)}
+                  />
+                </label>
+                <label>
+                  Low-FODMAP Strictness
+                  <select
+                    value={settings.lowFodmapMode}
+                    onChange={(event) => handleSettingsChange("lowFodmapMode", event.target.value)}
+                  >
+                    <option value="off">Off</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="strict">Strict</option>
                   </select>
                 </label>
               </div>

@@ -401,6 +401,104 @@ textarea {
   gap: 0.75rem;
 }
 
+.rhythm-badge {
+  border: var(--borderWidth) solid var(--border);
+  padding: 0.75rem;
+  background: #fff7f2;
+  display: grid;
+  gap: 0.4rem;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+
+.rhythm-title {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.rhythm-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.rhythm-disclaimer {
+  font-size: 0.65rem;
+  color: var(--muted);
+}
+
+.calendar-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.calendar-card {
+  border: var(--borderWidth) solid var(--border);
+  background: var(--surface);
+  padding: 0.8rem;
+  text-align: left;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.calendar-card.active {
+  background: var(--fg);
+  color: #fff;
+}
+
+.calendar-header {
+  text-transform: uppercase;
+  font-weight: 700;
+  font-size: 0.75rem;
+}
+
+.calendar-date {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.calendar-card.active .calendar-date {
+  color: #fff;
+}
+
+.calendar-meal {
+  font-size: 0.8rem;
+  text-transform: none;
+}
+
+.why-panel {
+  border: var(--borderWidth) solid var(--border);
+  padding: 1rem;
+  background: #fff;
+}
+
+.why-panel ul {
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.disclaimer-note {
+  border: var(--borderWidth) solid var(--border);
+  padding: 0.75rem;
+  background: #fff0f2;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.narrative-grocery {
+  display: grid;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.narrative-grocery ul {
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
 .leftover-stack {
   display: grid;
   gap: 1rem;
