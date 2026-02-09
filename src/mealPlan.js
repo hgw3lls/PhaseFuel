@@ -335,6 +335,33 @@ const validatePlannerResponse = (payload) => {
   return { ok: errors.length === 0, errors };
 };
 
+const normalizePlannerResponse = (payload) => {
+  if (!payload || typeof payload !== "object") {
+    return payload;
+  }
+  if (!payload.groceryList || !Array.isArray(payload.groceryList.items)) {
+    return payload;
+  }
+  const normalizedItems = payload.groceryList.items.map((item) => {
+    if (!item || typeof item !== "object") {
+      return item;
+    }
+    const unit = typeof item.unit === "string" ? item.unit.trim() : "";
+    return {
+      ...item,
+      unit: unit.length > 0 ? item.unit : "each",
+    };
+  });
+
+  return {
+    ...payload,
+    groceryList: {
+      ...payload.groceryList,
+      items: normalizedItems,
+    },
+  };
+};
+
 const normalizeIngredient = (ingredient) => ingredient.trim().toLowerCase();
 
 const addIngredient = (store, ingredient, source) => {
@@ -393,5 +420,6 @@ export {
   MEAL_PLAN_SCHEMA,
   validateMealPlan,
   validatePlannerResponse,
+  normalizePlannerResponse,
   buildGroceryList,
 };

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSettings, DEFAULT_SETTINGS } from "./settings.jsx";
 import { calculateCyclePhase } from "./cycleCalculator.js";
 import { getMoonPhase } from "./moonPhase.js";
-import { validatePlannerResponse } from "./mealPlan.js";
+import { normalizePlannerResponse, validatePlannerResponse } from "./mealPlan.js";
 import { buildPlannerPrompt } from "./prompts/plannerPrompt.js";
 import { buildReadingPrompt } from "./prompts/readingPrompt.js";
 import {
@@ -354,7 +354,8 @@ export default function App() {
         return;
       }
 
-      const validation = validatePlannerResponse(parsedPlan);
+      const normalizedPlan = normalizePlannerResponse(parsedPlan);
+      const validation = validatePlannerResponse(normalizedPlan);
       if (!validation.ok) {
         setPlannerData(null);
         setGroceryList([]);
@@ -367,13 +368,13 @@ export default function App() {
       }
 
       const nextGrocery = useWhatYouHaveMode
-        ? adjustGroceryListForPantry(parsedPlan.groceryList.items, pantryItems)
-        : parsedPlan.groceryList.items;
+        ? adjustGroceryListForPantry(normalizedPlan.groceryList.items, pantryItems)
+        : normalizedPlan.groceryList.items;
 
-      setPlannerData(parsedPlan);
+      setPlannerData(normalizedPlan);
       setGroceryList(nextGrocery);
-      setPrepSteps(parsedPlan.prepSteps);
-      setEstimatedCost(parsedPlan.estimatedCost || null);
+      setPrepSteps(normalizedPlan.prepSteps);
+      setEstimatedCost(normalizedPlan.estimatedCost || null);
       setGenerationState("success");
 
       if (settings.featureFlags.enableLeftoverFatiguePrevention) {
