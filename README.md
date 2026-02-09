@@ -1,31 +1,19 @@
 # PhaseFuel
 
-PhaseFuel started as a backend service for generating cycle-aware meal plans. This repo now also includes a static web app that runs entirely in the browser so it can be deployed on GitHub Pages.
+PhaseFuel is now a Vite + React single-page app that runs entirely in the browser. It calls the OpenAI API directly and stores plans locally in `localStorage` by user ID.
 
-## Web App (GitHub Pages)
-
-The static web app lives in the `docs/` folder and uses the OpenAI API directly from the browser. Plans are saved locally in `localStorage` by user ID.
-
-### Run locally
+## Run locally
 
 ```bash
-python3 -m http.server --directory docs 8000
+npm install
+npm run dev
 ```
 
-Then open `http://localhost:8000` in your browser.
+Then open the local URL shown in your terminal (typically `http://localhost:5173`).
 
-### Deploy to GitHub Pages
-
-1. In your GitHub repo settings, enable GitHub Pages.
-2. Choose the `main` branch and `/docs` folder as the source.
-3. Save and visit the URL that GitHub Pages provides.
-
-## Backend API (original)
-
-The FastAPI backend in `main.py` still expects Firebase credentials and an OpenAI API key.
+## Build for production
 
 ```bash
-export FIREBASE_CREDENTIALS="<base64 JSON>"
-export OPENAI_API_KEY="<api key>"
-python main.py
+npm run build
+npm run preview
 ```
