@@ -1,37 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { validatePlannerResponse } from "./mealPlan.js";
-import { calculateCyclePhase } from "./cycleCalculator.js";
-import { getMoonPhase } from "./moonPhase.js";
-import { buildPlannerPrompt } from "./prompts/plannerPrompt.js";
-import { buildReadingPrompt } from "./prompts/readingPrompt.js";
-import {
-  adjustGroceryListForPantry,
-  loadPantry,
-  removePantryItem,
-  savePantry,
-  summarizePantry,
-  upsertPantryItem,
-} from "./modules/pantry.js";
-import {
-  addFreezerItem,
-  loadFreezer,
-  removeFreezerItem,
-  saveFreezer,
-} from "./modules/freezer.js";
-import {
-  loadPrices,
-  removePriceItem,
-  savePrices,
-  summarizePrices,
-  upsertPriceItem,
-} from "./modules/priceMemory.js";
-import {
-  loadHistory,
-  saveHistory,
-  updateHistory,
-  MAX_HISTORY,
-} from "./modules/leftoverHistory.js";
-import { DEFAULT_SETTINGS, useSettings } from "./settings.jsx";
+import { useMemo, useState } from "react";
+import { useSettings } from "./settings.jsx";
 
 const STORAGE_KEY = "phasefuel_api_key";
 const PLAN_STORAGE_KEY = "phasefuel_meal_plans";
@@ -52,14 +20,49 @@ const getStoredPlans = () => {
   return raw ? JSON.parse(raw) : {};
 };
 
-const formatDate = (date) => {
-  if (!date) {
-    return "";
+const buildPrompt = (cycleDay, symptoms, settings) => {
+  const preferences = [];
+  const features = [];
+
+  if (settings.preferLeftoverLunch) {
+    preferences.push("Prefer leftover-based lunches where possible.");
   }
-  return new Date(date).toLocaleDateString();
+  if (settings.preferBatchCooking) {
+    preferences.push("Favor batch cooking and reusable components.");
+  }
+  if (settings.showOccultReadingLayer) {
+    preferences.push("Include a short occult-themed reading layer for each day.");
+  }
+
+  if (settings.featureFlags.enablePantryTracking) {
+    features.push("Include pantry tracking prompts.");
+  }
+  if (settings.featureFlags.enableLeftoverFatiguePrevention) {
+    features.push("Rotate leftovers to prevent fatigue.");
+  }
+  if (settings.featureFlags.enableBatchDay) {
+    features.push("Designate a batch day prep block.");
+  }
+  if (settings.featureFlags.enableFreezerTags) {
+    features.push("Tag freezer-friendly items.");
+  }
+  if (settings.featureFlags.enableBudgetOptimizer) {
+    features.push("Optimize for budget-friendly ingredients.");
+  }
+  if (settings.featureFlags.enableUseWhatYouHaveMode) {
+    features.push("Prioritize use-what-you-have mode.");
+  }
+
+  return [
+    `Generate a healthy meal plan for cycle day ${cycleDay} with symptoms: ${symptoms}.`,
+    preferences.length ? `Preferences: ${preferences.join(" ")}` : "",
+    features.length ? `Advanced features: ${features.join(" ")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 };
 
-const requestOpenAi = async ({ apiKey, messages, temperature = 0.4 }) => {
+const requestMealPlan = async ({ apiKey, cycleDay, symptoms, settings }) => {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -68,8 +71,13 @@ const requestOpenAi = async ({ apiKey, messages, temperature = 0.4 }) => {
     },
     body: JSON.stringify({
       model: "gpt-3.5-turbo",
-      temperature,
-      messages,
+      temperature: 0.7,
+      messages: [
+        {
+          role: "user",
+          content: buildPrompt(cycleDay, symptoms, settings),
+        },
+      ],
     }),
   });
 
@@ -149,20 +157,7 @@ export default function App() {
   const [lookupUserId, setLookupUserId] = useState("");
   const [savedPlan, setSavedPlan] = useState("No saved plan loaded.");
   const [isLoading, setIsLoading] = useState(false);
-  const [useWhatYouHaveOverride, setUseWhatYouHaveOverride] = useState(false);
-  const { settings, updateSettings, setSettings } = useSettings();
-
-  const plansByUser = useMemo(() => getStoredPlans(), [plannerRaw, savedPlan]);
-
-  const cycleInfo = useMemo(
-    () => calculateCyclePhase(new Date(), settings.cyclePreferences),
-    [settings.cyclePreferences]
-  );
-  const moonInfo = useMemo(() => getMoonPhase(new Date()), []);
-
-  useEffect(() => {
-    savePantry(pantryItems);
-  }, [pantryItems]);
+  const { settings, updateSettings } = useSettings();
 
   useEffect(() => {
     saveFreezer(freezerItems);
@@ -220,14 +215,6 @@ export default function App() {
         cycleDay: cycleDay.trim(),
         symptoms: symptoms.trim(),
         settings,
-        cycleInfo,
-        moonInfo,
-        pantryItems: pantrySummary,
-        budgetNotes: budgetNotes.trim(),
-        priceMemory: priceSummary,
-        history: historyItems,
-        transformationLibrary: TRANSFORMATION_LIBRARY,
-        useWhatYouHaveMode,
       });
       setPlannerRaw(responsePlan || "No plan returned.");
 
@@ -294,15 +281,8 @@ export default function App() {
         [userId.trim()]: {
           cycle_day: Number(cycleDay),
           symptoms: symptoms.trim(),
-          planner_response: parsedPlan,
-          planner_raw: responsePlan,
-          grocery_list: parsedPlan.groceryList,
-          prep_steps: parsedPlan.prepSteps,
-          estimated_cost: parsedPlan.estimatedCost || null,
+          meal_plan: responsePlan,
           settings_snapshot: settings,
-          cycle_snapshot: cycleInfo,
-          moon_snapshot: moonInfo,
-          occult_reading: settings.showOccultReadingLayer ? occultText : null,
         },
       };
       localStorage.setItem(PLAN_STORAGE_KEY, JSON.stringify(updatedPlans));
@@ -349,57 +329,6 @@ export default function App() {
     }
   };
 
-  const handleCyclePreferenceChange = (field, value) => {
-    updateSettings({
-      cyclePreferences: {
-        [field]: value,
-      },
-    });
-  };
-
-  const handleSettingsChange = (field, value) => {
-    updateSettings({
-      [field]: value,
-    });
-  };
-
-  const handleResetDefaults = () => {
-    setSettings(DEFAULT_SETTINGS);
-  };
-
-  const addPantryItem = (event) => {
-    event.preventDefault();
-    if (!pantryInput.name.trim()) {
-      return;
-    }
-    setPantryItems((items) => upsertPantryItem(items, pantryInput));
-    setPantryInput({ name: "", qty: "", unit: "", expiresOn: "" });
-  };
-
-  const addFreezerEntry = (event) => {
-    event.preventDefault();
-    if (!freezerInput.name.trim()) {
-      return;
-    }
-    setFreezerItems((items) => addFreezerItem(items, freezerInput));
-    setFreezerInput({ name: "", portions: "" });
-  };
-
-  const addPriceEntry = (event) => {
-    event.preventDefault();
-    if (!priceInput.name.trim()) {
-      return;
-    }
-    const parsedPrice = Number.parseFloat(priceInput.price);
-    if (Number.isNaN(parsedPrice)) {
-      return;
-    }
-    setPriceItems((items) =>
-      upsertPriceItem(items, { ...priceInput, price: parsedPrice })
-    );
-    setPriceInput({ name: "", unit: "", price: "" });
-  };
-
   const coreSettings = [
     {
       key: "preferLeftoverLunch",
@@ -434,36 +363,31 @@ export default function App() {
       description: "Track pantry staples and reuse signals.",
     },
     {
-      key: "enableUseWhatYouHaveMode",
-      label: "Enable use-what-you-have mode",
-      description: "Prioritize pantry-first recipes in every plan.",
-    },
-    {
       key: "enableLeftoverFatiguePrevention",
       label: "Enable leftover fatigue prevention",
-      description: "Vary transformations to avoid repetition.",
+      description: "Cycle leftovers to avoid repetition fatigue.",
     },
     {
       key: "enableBatchDay",
       label: "Enable batch day",
-      description: "Cook bases once and reuse across the week.",
+      description: "Schedule a dedicated batch cooking day.",
     },
     {
       key: "enableFreezerTags",
       label: "Enable freezer tags",
-      description: "Flag meals for freezing and track portions.",
+      description: "Mark freezer-ready meals in the plan.",
     },
     {
       key: "enableBudgetOptimizer",
       label: "Enable budget optimizer",
-      description: "Estimate totals and suggest substitutions.",
+      description: "Focus on budget-conscious ingredients.",
+    },
+    {
+      key: "enableUseWhatYouHaveMode",
+      label: "Enable use-what-you-have mode",
+      description: "Prioritize pantry-first recipes.",
     },
   ];
-
-  const mealPlan = plannerData?.mealPlan || null;
-  const flowMap = buildFlowMap(mealPlan);
-  const pantryFirst =
-    settings.featureFlags.enableUseWhatYouHaveMode || useWhatYouHaveOverride;
 
   return (
     <div className="page">
@@ -478,7 +402,6 @@ export default function App() {
           <nav className="nav">
             <a href="#api-vault">API Vault</a>
             <a href="#generator">Generator</a>
-            <a href="#today">Today</a>
             <a href="#settings">Settings</a>
             <a href="#saved-plans">Saved Plans</a>
           </nav>
@@ -511,31 +434,6 @@ export default function App() {
           <button type="button" onClick={handleSaveKey}>
             Save Key
           </button>
-        </section>
-
-        <section className="panel" id="today">
-          <h2>Today</h2>
-          <p>Offline phase readout for cycle + lunar context.</p>
-          <div className="today-grid">
-            <div>
-              <span className="today-label">Cycle Phase</span>
-              <div className="today-value">
-                {cycleInfo?.phase ? `${cycleInfo.phase} (Day ${cycleInfo.dayInCycle})` : "Unknown"}
-              </div>
-              <div className="today-meta">
-                Next: {cycleInfo?.nextPhase || "TBD"} on
-                {cycleInfo?.nextPhaseDate ? ` ${formatDate(cycleInfo.nextPhaseDate)}` : " --"}
-              </div>
-            </div>
-            <div>
-              <span className="today-label">Moon Phase</span>
-              <div className="today-value">{moonInfo?.name || "Unknown"}</div>
-              <div className="today-meta">
-                Next: {moonInfo?.nextPhaseName || "TBD"} on
-                {moonInfo?.nextPhaseDate ? ` ${formatDate(moonInfo.nextPhaseDate)}` : " --"}
-              </div>
-            </div>
-          </div>
         </section>
 
         <section className="panel wide" id="generator">
@@ -1087,6 +985,64 @@ export default function App() {
           <button type="button" className="ghost" onClick={handleResetDefaults}>
             Reset to Defaults
           </button>
+        </section>
+
+        {settings.showOccultReadingLayer ? (
+          <section className="panel">
+            <h2>Occult Reading Layer</h2>
+            <p>
+              The oracle is active. Your plans will include a mystical layer that maps
+              cravings to cycle energy.
+            </p>
+            <div className="toggle-pill">Status: Enabled</div>
+          </section>
+        ) : null}
+
+        <section className="panel" id="settings">
+          <h2>Settings</h2>
+          <p>Toggle core preferences and experimental feature flags.</p>
+          <div className="toggle-group">
+            <h3>Core Preferences</h3>
+            <div className="toggle-list">
+              {coreSettings.map((item) => (
+                <label className="toggle-item" key={item.key}>
+                  <div>
+                    <span className="toggle-label">{item.label}</span>
+                    <span className="toggle-description">{item.description}</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={item.value}
+                    onChange={item.onChange}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="toggle-group">
+            <h3>Feature Flags</h3>
+            <div className="toggle-list">
+              {featureFlags.map((flag) => (
+                <label className="toggle-item" key={flag.key}>
+                  <div>
+                    <span className="toggle-label">{flag.label}</span>
+                    <span className="toggle-description">{flag.description}</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.featureFlags[flag.key]}
+                    onChange={() =>
+                      updateSettings({
+                        featureFlags: {
+                          [flag.key]: !settings.featureFlags[flag.key],
+                        },
+                      })
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
         </section>
 
         <section className="panel" id="saved-plans">
