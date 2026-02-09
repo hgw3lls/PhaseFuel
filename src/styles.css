@@ -336,6 +336,16 @@ footer {
   color: var(--muted);
 }
 
+@media (min-width: 960px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .review-grid {
+    grid-template-columns: repeat(5, minmax(140px, 1fr));
+  }
+}
+
 @media (max-width: 720px) {
   .layout {
     grid-template-columns: 1fr;

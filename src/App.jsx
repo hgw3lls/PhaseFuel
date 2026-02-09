@@ -211,12 +211,20 @@ export default function App() {
   const [savedPlan, setSavedPlan] = useState("No saved plan loaded.");
   const [isLoading, setIsLoading] = useState(false);
   const [useWhatYouHaveOverride, setUseWhatYouHaveOverride] = useState(false);
+  const [activeView, setActiveView] = useState("plan");
   const { settings, setSettings, updateSettings } = useSettings();
 
   const plansByUser = useMemo(() => getStoredPlans(), [plannerData, savedPlan]);
   const mealPlan = plannerData?.mealPlan || null;
   const flowMap = useMemo(() => buildFlowMap(mealPlan), [mealPlan]);
   const pantryFirst = settings.featureFlags.enableUseWhatYouHaveMode || useWhatYouHaveOverride;
+  const requestSummary = {
+    userId: userId.trim() || "Not set",
+    cycleDay: cycleDay.trim() || "Not set",
+    symptoms: symptoms.trim() || "Not set",
+    pantryMode: pantryFirst ? "On" : "Off",
+    budgetNotes: budgetNotes.trim() || "None",
+  };
   const cycleInfo = useMemo(
     () => calculateCyclePhase(new Date(), settings.cyclePreferences),
     [settings.cyclePreferences]
@@ -513,11 +521,21 @@ export default function App() {
             A stark, high-contrast control panel for generating cycle-aware meal plans and
             saving them locally.
           </p>
-          <nav className="nav">
-            <a href="#api-vault">API Vault</a>
-            <a href="#generator">Generator</a>
-            <a href="#settings">Settings</a>
-            <a href="#saved-plans">Saved Plans</a>
+          <nav className="nav app-nav" aria-label="Primary">
+            <button
+              type="button"
+              className={activeView === "plan" ? "active" : ""}
+              onClick={() => setActiveView("plan")}
+            >
+              Plan
+            </button>
+            <button
+              type="button"
+              className={activeView === "settings" ? "active" : ""}
+              onClick={() => setActiveView("settings")}
+            >
+              Settings
+            </button>
           </nav>
         </div>
         <div className="stats">
