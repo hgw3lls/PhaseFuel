@@ -11,7 +11,6 @@
     "dataset:build": "node --loader ./scripts/pipeline/ts-loader.mjs scripts/pipeline/01_ingest_json_recipes.ts && node --loader ./scripts/pipeline/ts-loader.mjs scripts/pipeline/02_build_ingredient_catalog.ts && node --loader ./scripts/pipeline/ts-loader.mjs scripts/pipeline/03_derive_recipe_index.ts"
   },
   "dependencies": {
-    "express": "^4.19.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

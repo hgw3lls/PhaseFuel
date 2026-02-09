@@ -1,7 +1,47 @@
-import express from "express";
+import http from "node:http";
+import { URL } from "node:url";
 
-const app = express();
-app.use(express.json({ limit: "2mb" }));
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
+
+const sendJson = (res, statusCode, payload) => {
+  res.writeHead(statusCode, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(payload));
+};
+
+const readJsonBody = (req) =>
+  new Promise((resolve, reject) => {
+    let body = "";
+    let size = 0;
+
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        const error = new Error("Payload too large");
+        error.statusCode = 413;
+        req.destroy(error);
+        return;
+      }
+      body += chunk;
+    });
+
+    req.on("end", () => {
+      if (!body) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch (error) {
+        const parseError = new Error("Invalid JSON");
+        parseError.statusCode = 400;
+        reject(parseError);
+      }
+    });
+
+    req.on("error", (error) => {
+      reject(error);
+    });
+  });
 
 const buildPrompt = ({ profileSummary, weekStartISO, weeklyPlanJson, allowedTokens }) => {
   const schema = {
@@ -27,58 +67,77 @@ const fallbackResponse = (reason = "AI unavailable") => ({
   substitutions: [],
 });
 
-app.post("/api/planNarrative", async (req, res) => {
-  const { profileSummary, weekStartISO, weeklyPlanJson, allowedTokens } = req.body || {};
-  if (!profileSummary || !weekStartISO || !weeklyPlanJson || !Array.isArray(allowedTokens)) {
-    res.status(400).json({ error: "Missing required fields." });
-    return;
-  }
+const port = process.env.PORT || 3001;
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    res.status(200).json(fallbackResponse("Missing OPENAI_API_KEY"));
-    return;
-  }
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
-  try {
-    const { system, user } = buildPrompt({
-      profileSummary,
-      weekStartISO,
-      weeklyPlanJson,
-      allowedTokens,
-    });
+  if (req.method === "POST" && url.pathname === "/api/planNarrative") {
+    let body = {};
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.2,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      res.status(200).json(fallbackResponse("Upstream error"));
+    try {
+      body = await readJsonBody(req);
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      const message = statusCode === 413 ? "Payload too large." : "Invalid JSON.";
+      sendJson(res, statusCode, { error: message });
       return;
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "";
-    const parsed = JSON.parse(content);
-    res.status(200).json(parsed);
-  } catch (error) {
-    res.status(200).json(fallbackResponse("Parsing failed"));
+    const { profileSummary, weekStartISO, weeklyPlanJson, allowedTokens } = body || {};
+    if (!profileSummary || !weekStartISO || !weeklyPlanJson || !Array.isArray(allowedTokens)) {
+      sendJson(res, 400, { error: "Missing required fields." });
+      return;
+    }
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      sendJson(res, 200, fallbackResponse("Missing OPENAI_API_KEY"));
+      return;
+    }
+
+    try {
+      const { system, user } = buildPrompt({
+        profileSummary,
+        weekStartISO,
+        weeklyPlanJson,
+        allowedTokens,
+      });
+
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          temperature: 0.2,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        sendJson(res, 200, fallbackResponse("Upstream error"));
+        return;
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || "";
+      const parsed = JSON.parse(content);
+      sendJson(res, 200, parsed);
+    } catch (error) {
+      sendJson(res, 200, fallbackResponse("Parsing failed"));
+    }
+    return;
   }
+
+  sendJson(res, 404, { error: "Not found" });
 });
 
-const port = process.env.PORT || 3001;
-app.listen(port, () => {
+server.listen(port, () => {
   console.info(`Narrative server listening on ${port}`);
 });
