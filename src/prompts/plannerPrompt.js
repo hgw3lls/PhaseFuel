@@ -3,6 +3,10 @@ import { MEAL_PLAN_SCHEMA } from "../mealPlan.js";
 const buildPlannerPrompt = ({
   cycleDay,
   symptoms,
+  planDays,
+  dietaryPreferences,
+  cuisinePreferences,
+  foodAvoidances,
   settings,
   cycleInfo,
   moonInfo,
@@ -110,8 +114,20 @@ const buildPlannerPrompt = ({
     ? `Batch day is ${settings.batchDayOfWeek} with ${settings.batchTimeBudgetMin} minutes. Generate two bases on batch day and reuse across dinners.`
     : "";
 
+  const dayCount = Number.isFinite(planDays) ? Math.min(Math.max(planDays, 1), 7) : 7;
+  const planDaysLine = `Plan length: generate exactly ${dayCount} day(s) (days 1-${dayCount}). The "mealPlan.days" array must be length ${dayCount} and use sequential day numbers starting at 1.`;
+  const tasteLine = [
+    dietaryPreferences ? `Dietary preferences: ${dietaryPreferences}.` : "",
+    cuisinePreferences ? `Cuisine focus: ${cuisinePreferences}.` : "",
+    foodAvoidances ? `Avoid/dislikes: ${foodAvoidances}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return [
     `Planner pass: generate a strict JSON plan for cycle day ${cycleDay} with symptoms: ${symptoms}.`,
+    planDaysLine,
+    tasteLine,
     `Context: ${context.join(" ")}`,
     pantryLine,
     priceLine,

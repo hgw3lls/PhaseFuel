@@ -265,6 +265,11 @@ export default function App() {
   const [activeView, setActiveView] = useState("today");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activePlanDay, setActivePlanDay] = useState(null);
+  const [isDinnerExpanded, setIsDinnerExpanded] = useState(false);
+  const [planDays, setPlanDays] = useState(7);
+  const [dietaryPreferences, setDietaryPreferences] = useState("");
+  const [cuisinePreferences, setCuisinePreferences] = useState("");
+  const [foodAvoidances, setFoodAvoidances] = useState("");
   const [groceryChecks, setGroceryChecks] = useState(() => getStoredChecks());
   const { settings, setSettings, updateSettings } = useSettings();
 
@@ -303,6 +308,10 @@ export default function App() {
       setActivePlanDay((current) => current ?? mealPlan.days[0].day);
     }
   }, [mealPlan]);
+
+  useEffect(() => {
+    setIsDinnerExpanded(false);
+  }, [activePlanDay]);
 
   const handleSettingsChange = (key, value) => {
     updateSettings({ [key]: value });
@@ -385,6 +394,10 @@ export default function App() {
         apiKey: apiKey.trim(),
         cycleDay: cycleDay.trim(),
         symptoms: symptoms.trim(),
+        planDays,
+        dietaryPreferences: dietaryPreferences.trim(),
+        cuisinePreferences: cuisinePreferences.trim(),
+        foodAvoidances: foodAvoidances.trim(),
         settings,
         cycleInfo,
         moonInfo,
@@ -542,6 +555,36 @@ export default function App() {
     setDrawerOpen(false);
   };
 
+  const toggleDinnerExpand = () => {
+    setIsDinnerExpanded((current) => !current);
+  };
+
+  const handleAddDinnerToGroceries = () => {
+    const ingredients = activeDayData?.meals?.dinner?.ingredients || [];
+    const additions = ingredients
+      .map((item) => item?.trim())
+      .filter(Boolean)
+      .map((name) => ({ name, qty: "", unit: "", category: "Extra" }));
+
+    if (!additions.length) {
+      setStatus("No dinner ingredients available to add.");
+      return;
+    }
+
+    setGroceryList((current) => {
+      const existing = new Set(current.map((item) => item.name.toLowerCase()));
+      const nextAdditions = additions.filter((item) => !existing.has(item.name.toLowerCase()));
+      if (!nextAdditions.length) {
+        setStatus("Dinner ingredients already in grocery list.");
+        return current;
+      }
+      setStatus(
+        `Added ${nextAdditions.length} dinner item${nextAdditions.length > 1 ? "s" : ""} to grocery list.`
+      );
+      return [...current, ...nextAdditions];
+    });
+  };
+
   const coreSettings = [
     {
       key: "preferLeftoverLunch",
@@ -602,8 +645,12 @@ export default function App() {
     },
   ];
 
-  const weekdayLabels = buildWeekdayLabels(mealPlan?.days?.length || 7);
-  const dayChips = (mealPlan?.days || Array.from({ length: 7 }, (_, index) => ({ day: index + 1 })))
+  const fallbackDayCount = planDays || 7;
+  const weekdayLabels = buildWeekdayLabels(mealPlan?.days?.length || fallbackDayCount);
+  const dayChips = (
+    mealPlan?.days ||
+    Array.from({ length: fallbackDayCount }, (_, index) => ({ day: index + 1 }))
+  )
     .map((day, index) => ({
       label: weekdayLabels[index] || `Day ${day.day}`,
       value: day.day,
@@ -718,6 +765,22 @@ export default function App() {
                     required
                   />
                 </label>
+                <label>
+                  Plan Days
+                  <select
+                    value={planDays}
+                    onChange={(event) => setPlanDays(Number.parseInt(event.target.value, 10))}
+                  >
+                    {Array.from({ length: 7 }, (_, index) => {
+                      const day = index + 1;
+                      return (
+                        <option key={day} value={day}>
+                          {day} {day === 1 ? "day" : "days"}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </label>
                 <label className="stretch">
                   Symptoms
                   <textarea
@@ -726,6 +789,33 @@ export default function App() {
                     onChange={(event) => setSymptoms(event.target.value)}
                     placeholder="bloating, low energy"
                     required
+                  />
+                </label>
+                <label>
+                  Dietary Preferences
+                  <input
+                    type="text"
+                    value={dietaryPreferences}
+                    onChange={(event) => setDietaryPreferences(event.target.value)}
+                    placeholder="vegetarian, high-protein"
+                  />
+                </label>
+                <label>
+                  Cuisine Focus
+                  <input
+                    type="text"
+                    value={cuisinePreferences}
+                    onChange={(event) => setCuisinePreferences(event.target.value)}
+                    placeholder="Mediterranean, Korean"
+                  />
+                </label>
+                <label className="stretch">
+                  Avoid/Dislikes
+                  <textarea
+                    rows="2"
+                    value={foodAvoidances}
+                    onChange={(event) => setFoodAvoidances(event.target.value)}
+                    placeholder="cilantro, peanuts"
                   />
                 </label>
                 {settings.featureFlags.enableBudgetOptimizer ? (
@@ -842,15 +932,37 @@ export default function App() {
                     {activeDayData?.meals?.dinner?.ingredients?.join(", ") ||
                       "Broccoli, sweet potato, chickpeas, olive oil."}
                   </p>
+                  {isDinnerExpanded ? (
+                    <div className="expanded-details">
+                      <div>Servings cooked: {activeDayData?.meals?.dinner?.servingsCooked ?? 4}</div>
+                      <div>Servings dinner: {activeDayData?.meals?.dinner?.servingsDinner ?? 2}</div>
+                      <div>
+                        Leftovers: {activeDayData?.meals?.dinner?.leftoverPortions ?? 2} portion(s)
+                      </div>
+                      <div>Batch tag: {activeDayData?.meals?.dinner?.batchTag ?? "batch-tag"}</div>
+                      <div>
+                        Transformations:{" "}
+                        {activeDayData?.meals?.dinner?.transformationOptions?.join(", ") ||
+                          "Wrap, Bowl, Salad"}
+                      </div>
+                      <div>
+                        Freezer friendly:{" "}
+                        {activeDayData?.meals?.dinner?.freezeFriendly ? "Yes" : "No"}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="card-actions">
+                  <button type="button" className="ghost" onClick={toggleDinnerExpand}>
+                    {isDinnerExpanded ? "Collapse" : "Expand"}
+                  </button>
                   <button type="button" className="ghost">
                     Swap
                   </button>
                   <button type="button" className="ghost">
                     Mark Cooked
                   </button>
-                  <button type="button" className="ghost">
+                  <button type="button" className="ghost" onClick={handleAddDinnerToGroceries}>
                     Add to Grocery
                   </button>
                 </div>
