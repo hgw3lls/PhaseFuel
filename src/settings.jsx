@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 const SETTINGS_STORAGE_KEY = "phasefuel.settings.v1";
-const SETTINGS_VERSION = 1;
+const SETTINGS_VERSION = 3;
 
 /**
  * @typedef {Object} FeatureFlags
@@ -18,6 +18,8 @@ const SETTINGS_VERSION = 1;
  * @property {string} lastPeriodStart
  * @property {number} cycleLength
  * @property {number} lutealLength
+ * @property {number} periodLength
+ * @property {string} lastOvulation
  */
 
 /**
@@ -26,18 +28,26 @@ const SETTINGS_VERSION = 1;
  * @property {FeatureFlags} featureFlags
  * @property {boolean} preferLeftoverLunch
  * @property {boolean} preferBatchCooking
- * @property {boolean} showOccultReadingLayer
  * @property {CyclePreferences} cyclePreferences
+ * @property {"period_based"|"ovulation_aware"|"moon_only"|"symptom_only"} cycleMode
  * @property {string} batchDayOfWeek
  * @property {number} batchTimeBudgetMin
+ * @property {number} timeBudgetMin
  * @property {number|null} weeklyBudget
  * @property {string} costMode
+ * @property {"omnivore"|"pescatarian"|"vegetarian"|"vegan"} dietPattern
+ * @property {boolean} glutenFree
+ * @property {"off"|"moderate"|"strict"} lowFodmapMode
+ * @property {boolean} includeSnacks
+ * @property {number} maxRepeatsPerWeek
  */
 
 const DEFAULT_CYCLE_PREFERENCES = {
   lastPeriodStart: "",
   cycleLength: 28,
   lutealLength: 14,
+  periodLength: 5,
+  lastOvulation: "",
 };
 
 /** @type {PhaseFuelSettings} */
@@ -53,12 +63,18 @@ const DEFAULT_SETTINGS = {
   },
   preferLeftoverLunch: true,
   preferBatchCooking: true,
-  showOccultReadingLayer: true,
   cyclePreferences: DEFAULT_CYCLE_PREFERENCES,
+  cycleMode: "period_based",
   batchDayOfWeek: "Sunday",
   batchTimeBudgetMin: 90,
+  timeBudgetMin: 30,
   weeklyBudget: null,
   costMode: "normal",
+  dietPattern: "omnivore",
+  glutenFree: false,
+  lowFodmapMode: "off",
+  includeSnacks: true,
+  maxRepeatsPerWeek: 2,
 };
 
 const coerceBoolean = (value, fallback) => (typeof value === "boolean" ? value : fallback);
@@ -70,6 +86,21 @@ const coerceNullableNumber = (value, fallback) =>
 
 const COST_MODES = ["tight", "normal", "generous"];
 const coerceCostMode = (value) => (COST_MODES.includes(value) ? value : DEFAULT_SETTINGS.costMode);
+
+const CYCLE_MODES = ["period_based", "ovulation_aware", "moon_only", "symptom_only"];
+const coerceCycleMode = (value) =>
+  CYCLE_MODES.includes(value) ? value : DEFAULT_SETTINGS.cycleMode;
+
+const FODMAP_MODES = ["off", "moderate", "strict"];
+const coerceFodmapMode = (value, legacyFlag) => {
+  if (FODMAP_MODES.includes(value)) {
+    return value;
+  }
+  if (legacyFlag) {
+    return "moderate";
+  }
+  return DEFAULT_SETTINGS.lowFodmapMode;
+};
 
 const normalizeFeatureFlags = (flags = {}) => ({
   enablePantryTracking: coerceBoolean(
@@ -99,6 +130,8 @@ const normalizeCyclePreferences = (prefs = {}) => ({
   lastPeriodStart: coerceString(prefs.lastPeriodStart, DEFAULT_CYCLE_PREFERENCES.lastPeriodStart),
   cycleLength: coerceNumber(prefs.cycleLength, DEFAULT_CYCLE_PREFERENCES.cycleLength),
   lutealLength: coerceNumber(prefs.lutealLength, DEFAULT_CYCLE_PREFERENCES.lutealLength),
+  periodLength: coerceNumber(prefs.periodLength, DEFAULT_CYCLE_PREFERENCES.periodLength),
+  lastOvulation: coerceString(prefs.lastOvulation, DEFAULT_CYCLE_PREFERENCES.lastOvulation),
 });
 
 const normalizeSettings = (candidate) => {
@@ -120,18 +153,24 @@ const normalizeSettings = (candidate) => {
       candidate.preferBatchCooking,
       DEFAULT_SETTINGS.preferBatchCooking
     ),
-    showOccultReadingLayer: coerceBoolean(
-      candidate.showOccultReadingLayer,
-      DEFAULT_SETTINGS.showOccultReadingLayer
-    ),
     cyclePreferences: normalizeCyclePreferences(candidate.cyclePreferences),
+    cycleMode: coerceCycleMode(candidate.cycleMode),
     batchDayOfWeek: coerceString(candidate.batchDayOfWeek, DEFAULT_SETTINGS.batchDayOfWeek),
     batchTimeBudgetMin: coerceNumber(
       candidate.batchTimeBudgetMin,
       DEFAULT_SETTINGS.batchTimeBudgetMin
     ),
+    timeBudgetMin: coerceNumber(candidate.timeBudgetMin, DEFAULT_SETTINGS.timeBudgetMin),
     weeklyBudget: coerceNullableNumber(candidate.weeklyBudget, DEFAULT_SETTINGS.weeklyBudget),
     costMode: coerceCostMode(candidate.costMode),
+    dietPattern: coerceString(candidate.dietPattern, DEFAULT_SETTINGS.dietPattern),
+    glutenFree: coerceBoolean(candidate.glutenFree, DEFAULT_SETTINGS.glutenFree),
+    lowFodmapMode: coerceFodmapMode(candidate.lowFodmapMode, candidate.lowFodmap),
+    includeSnacks: coerceBoolean(candidate.includeSnacks, DEFAULT_SETTINGS.includeSnacks),
+    maxRepeatsPerWeek: coerceNumber(
+      candidate.maxRepeatsPerWeek,
+      DEFAULT_SETTINGS.maxRepeatsPerWeek
+    ),
   };
 };
 

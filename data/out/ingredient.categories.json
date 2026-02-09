@@ -1,0 +1,8 @@
+{
+  "produce": ["berries", "spinach", "avocado", "cucumber", "bell pepper", "snap peas", "ginger"],
+  "protein": ["salmon", "tofu", "hummus"],
+  "pantry": ["chia seeds", "olive oil", "brown rice", "almond butter", "almond milk", "gluten-free oats"],
+  "spices": ["cinnamon"],
+  "dairy alternatives": ["almond milk"],
+  "misc": []
+}
