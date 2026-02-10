@@ -662,6 +662,54 @@ textarea {
   text-align: center;
 }
 
+.loading-state {
+  border: var(--borderWidth) solid var(--border);
+  padding: 1.25rem;
+  background: var(--surface);
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: var(--borderWidth) solid var(--border);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.progress-track {
+  width: min(520px, 100%);
+  border: var(--borderWidth) solid var(--border);
+  height: 20px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.progress-stats {
+  width: min(520px, 100%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .search-row {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -670,6 +718,14 @@ textarea {
 
 .search-row.compact {
   grid-template-columns: 1fr auto;
+}
+
+
+.instruction-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.35rem;
 }
 
 .helper {
