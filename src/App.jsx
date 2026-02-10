@@ -751,7 +751,7 @@ export default function App() {
       ? recipes.find((recipe) => recipe.id === activeRecipeMeal.recipeId) || null
       : null;
   const activeRecipeName =
-    activeRecipeDetails?.name || activeRecipeDetails?.title || getMealDisplayName(activeRecipeMeal);
+    activeRecipeDetails?.name || activeRecipeDetails?.title || activeRecipeMeal?.name || "Recipe";
   const activeRecipeIngredients =
     activeRecipeDetails?.ingredientTokens || activeRecipeMeal?.ingredients || [];
   const activeRecipeSteps =
