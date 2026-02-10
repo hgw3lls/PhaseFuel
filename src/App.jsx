@@ -41,12 +41,21 @@ const PLAN_STORAGE_KEY = "phasefuel_meal_plans";
 const GROCERY_CHECK_KEY = "phasefuel_grocery_checks";
 
 const VIEW_LABELS = {
-  today: "Period",
-  plan: "PLAN",
-  grocery: "GROCERY",
+  today: "Today",
+  plan: "Plan",
+  grocery: "Grocery",
   profile: "Profile",
   privacy: "Privacy",
   settings: "Settings",
+};
+
+const NAV_ICONS = {
+  today: "◐",
+  plan: "☰",
+  grocery: "✓",
+  profile: "◍",
+  privacy: "⎈",
+  settings: "⚙",
 };
 
 const ENERGY_BY_PHASE = {
@@ -61,6 +70,49 @@ const FOCUS_BY_PHASE = {
   follicular: "Creative",
   ovulatory: "Social",
   luteal: "Grounded",
+};
+
+const MOON_GUIDANCE = {
+  new: {
+    intention: "Set intentions and keep meals simple.",
+    ritual: "Light a candle, write one goal, and prep one grounding soup.",
+    vibe: "Reset",
+  },
+  "waxing crescent": {
+    intention: "Build momentum with energizing foods.",
+    ritual: "Add fresh herbs or citrus and choose one growth habit for this week.",
+    vibe: "Momentum",
+  },
+  "first quarter": {
+    intention: "Take decisive action on your plan.",
+    ritual: "Batch-cook two proteins and commit to your grocery anchors.",
+    vibe: "Action",
+  },
+  "waxing gibbous": {
+    intention: "Refine and optimize your routine.",
+    ritual: "Review pantry inventory and tighten your meal prep flow.",
+    vibe: "Refine",
+  },
+  full: {
+    intention: "Celebrate nourishment and connection.",
+    ritual: "Host a shared meal or plate something colorful and abundant.",
+    vibe: "Peak",
+  },
+  "waning gibbous": {
+    intention: "Integrate what worked and simplify.",
+    ritual: "Use leftovers creatively and note one ritual to keep.",
+    vibe: "Integrate",
+  },
+  "last quarter": {
+    intention: "Release friction and reduce decision fatigue.",
+    ritual: "Remove one draining recipe and replace it with a quick favorite.",
+    vibe: "Release",
+  },
+  "waning crescent": {
+    intention: "Rest, restore, and prep lightly.",
+    ritual: "Choose soft, warm meals and keep your next plan minimal.",
+    vibe: "Restore",
+  },
 };
 
 const getStoredPlans = () => {
@@ -227,6 +279,7 @@ export default function App() {
     () => computeSyncScore(cycleInfo.phase, Math.floor((moonInfo.age / 29.53) * 8)),
     [cycleInfo.phase, moonInfo.age]
   );
+  const moonGuidance = MOON_GUIDANCE[moonInfo.phase] || MOON_GUIDANCE.new;
 
   useEffect(() => {
     let isActive = true;
@@ -639,8 +692,8 @@ export default function App() {
   };
 
 
-  const handleAddDinnerToGroceries = () => {
-    const ingredients = activeDayData?.meals?.dinner?.ingredients || [];
+  const handleAddMealToGroceries = (mealType) => {
+    const ingredients = activeDayData?.meals?.[mealType]?.ingredients || [];
     const additions = ingredients
       .map((item) => item?.trim())
       .filter(Boolean)
@@ -656,7 +709,7 @@ export default function App() {
       }));
 
     if (!additions.length) {
-      setStatus("No dinner ingredients available to add.");
+      setStatus(`No ${mealType} ingredients available to add.`);
       return;
     }
 
@@ -664,11 +717,11 @@ export default function App() {
       const existing = new Set(current.map((item) => item.name.toLowerCase()));
       const nextAdditions = additions.filter((item) => !existing.has(item.name.toLowerCase()));
       if (!nextAdditions.length) {
-        setStatus("Dinner ingredients already in grocery list.");
+        setStatus(`${formatPhase(mealType)} ingredients already in grocery list.`);
         return current;
       }
       setStatus(
-        `Added ${nextAdditions.length} dinner item${nextAdditions.length > 1 ? "s" : ""} to grocery list.`
+        `Added ${nextAdditions.length} ${mealType} item${nextAdditions.length > 1 ? "s" : ""} to grocery list.`
       );
       return [...current, ...nextAdditions];
     });
@@ -823,7 +876,14 @@ export default function App() {
       </header>
 
       {drawerOpen ? (
-        <div className="drawer" role="dialog" aria-modal="true">
+        <>
+          <button
+            type="button"
+            className="drawer-backdrop"
+            onClick={toggleDrawer}
+            aria-label="Close navigation"
+          />
+          <div className="drawer" role="dialog" aria-modal="true">
           <div className="drawer-header">
             <span className="drawer-title">Navigate</span>
             <button type="button" className="icon-button" onClick={toggleDrawer} aria-label="Close">
@@ -846,7 +906,8 @@ export default function App() {
             <div className="status-pill">Status: {generationState}</div>
             <div className="status-note">{status}</div>
           </div>
-        </div>
+          </div>
+        </>
       ) : null}
 
       <main className="app-main">
@@ -854,8 +915,18 @@ export default function App() {
           <section className="screen">
             <div className="hero-block">
               <h1>Today</h1>
+              <p className="hero-subline">Build your week in under a minute.</p>
               <div className="info-pill">
                 Day {(cycleDay || "--")} • {formatPhase(cycleInfo.phase)} • {moonInfo.phase}
+              </div>
+              <div className="moon-oracle" aria-live="polite">
+                <div className="moon-oracle-kicker">Moon Oracle • {moonInfo.phase}</div>
+                <p className="moon-oracle-intention">{moonGuidance.intention}</p>
+                <p className="moon-oracle-ritual">Ritual cue: {moonGuidance.ritual}</p>
+                <div className="tag-row">
+                  <span className="tag">Arc: {moonGuidance.vibe}</span>
+                  <span className="tag">Lunar day: {Math.round(moonInfo.age) + 1}</span>
+                </div>
               </div>
               <div className="rhythm-badge">
                 <div className="rhythm-title">Rhythms</div>
@@ -886,45 +957,55 @@ export default function App() {
                   <strong>{FOCUS_BY_PHASE[cycleInfo.phase] || "Grounded"}</strong>
                 </div>
               </div>
+              <div className="quick-actions">
+                <button type="button" className="ghost" onClick={() => setPlanDays(3)}>
+                  Quick 3-day reset
+                </button>
+                <button type="button" className="ghost" onClick={() => setPlanDays(7)}>
+                  Full 7-day ritual
+                </button>
+              </div>
               <form onSubmit={handleGenerate} className="form-grid">
-                <label>
-                  User ID
-                  <input
-                    type="text"
-                    value={userId}
-                    onChange={(event) => setUserId(event.target.value)}
-                    placeholder="alex"
-                    required
-                  />
-                </label>
-                <label>
-                  Cycle Day
-                  <input
-                    type="number"
-                    min="1"
-                    max="31"
-                    value={cycleDay}
-                    onChange={(event) => setCycleDay(event.target.value)}
-                    placeholder="14"
-                    required
-                  />
-                </label>
-                <label>
-                  Plan Days
-                  <select
-                    value={planDays}
-                    onChange={(event) => setPlanDays(Number.parseInt(event.target.value, 10))}
-                  >
-                    {Array.from({ length: 7 }, (_, index) => {
-                      const day = index + 1;
-                      return (
-                        <option key={day} value={day}>
-                          {day} {day === 1 ? "day" : "days"}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </label>
+                <div className="quick-start-grid">
+                  <label>
+                    User ID
+                    <input
+                      type="text"
+                      value={userId}
+                      onChange={(event) => setUserId(event.target.value)}
+                      placeholder="alex"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Cycle Day
+                    <input
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={cycleDay}
+                      onChange={(event) => setCycleDay(event.target.value)}
+                      placeholder="14"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Plan Days
+                    <select
+                      value={planDays}
+                      onChange={(event) => setPlanDays(Number.parseInt(event.target.value, 10))}
+                    >
+                      {Array.from({ length: 7 }, (_, index) => {
+                        const day = index + 1;
+                        return (
+                          <option key={day} value={day}>
+                            {day} {day === 1 ? "day" : "days"}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                </div>
                 <label className="stretch">
                   Symptoms
                   <textarea
@@ -935,44 +1016,49 @@ export default function App() {
                     required
                   />
                 </label>
-                <label>
-                  Dietary Preferences
-                  <input
-                    type="text"
-                    value={dietaryPreferences}
-                    onChange={(event) => setDietaryPreferences(event.target.value)}
-                    placeholder="vegetarian, high-protein"
-                  />
-                </label>
-                <label>
-                  Cuisine Focus
-                  <input
-                    type="text"
-                    value={cuisinePreferences}
-                    onChange={(event) => setCuisinePreferences(event.target.value)}
-                    placeholder="Mediterranean, Korean"
-                  />
-                </label>
-                <label className="stretch">
-                  Avoid/Dislikes
-                  <textarea
-                    rows="2"
-                    value={foodAvoidances}
-                    onChange={(event) => setFoodAvoidances(event.target.value)}
-                    placeholder="cilantro, peanuts"
-                  />
-                </label>
-                {settings.featureFlags.enableBudgetOptimizer ? (
-                  <label className="stretch">
-                    Budget Constraints
-                    <textarea
-                      rows="2"
-                      value={budgetNotes}
-                      onChange={(event) => setBudgetNotes(event.target.value)}
-                      placeholder="$60/week, prioritize bulk grains"
-                    />
-                  </label>
-                ) : null}
+                <details className="accordion stretch" open={false}>
+                  <summary>Advanced preferences</summary>
+                  <div className="accordion-body">
+                    <label>
+                      Dietary Preferences
+                      <input
+                        type="text"
+                        value={dietaryPreferences}
+                        onChange={(event) => setDietaryPreferences(event.target.value)}
+                        placeholder="vegetarian, high-protein"
+                      />
+                    </label>
+                    <label>
+                      Cuisine Focus
+                      <input
+                        type="text"
+                        value={cuisinePreferences}
+                        onChange={(event) => setCuisinePreferences(event.target.value)}
+                        placeholder="Mediterranean, Korean"
+                      />
+                    </label>
+                    <label>
+                      Avoid/Dislikes
+                      <textarea
+                        rows="2"
+                        value={foodAvoidances}
+                        onChange={(event) => setFoodAvoidances(event.target.value)}
+                        placeholder="cilantro, peanuts"
+                      />
+                    </label>
+                    {settings.featureFlags.enableBudgetOptimizer ? (
+                      <label>
+                        Budget Constraints
+                        <textarea
+                          rows="2"
+                          value={budgetNotes}
+                          onChange={(event) => setBudgetNotes(event.target.value)}
+                          placeholder="$60/week, prioritize bulk grains"
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                </details>
                 <button type="submit" className="primary-button" disabled={isLoading || !isDataReady}>
                   {isLoading ? "Generating..." : "Generate Plan"}
                 </button>
@@ -1252,15 +1338,13 @@ export default function App() {
                               >
                                 Swap meal
                               </button>
-                              {mealType === "dinner" ? (
-                                <button
-                                  type="button"
-                                  className="ghost"
-                                  onClick={handleAddDinnerToGroceries}
-                                >
-                                  Add to Grocery
-                                </button>
-                              ) : null}
+                              <button
+                                type="button"
+                                className="ghost"
+                                onClick={() => handleAddMealToGroceries(mealType)}
+                              >
+                                Add to Grocery
+                              </button>
                             </div>
                           </div>
                         );
@@ -1915,6 +1999,9 @@ export default function App() {
             onClick={() => handleNav(view)}
           >
             <span className="nav-icon" aria-hidden="true" />
+            <span className="nav-icon-glyph" aria-hidden="true">
+              {NAV_ICONS[view] || "•"}
+            </span>
             <span className="nav-label">{VIEW_LABELS[view]}</span>
           </button>
         ))}
