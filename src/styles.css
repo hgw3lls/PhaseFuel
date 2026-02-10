@@ -672,6 +672,14 @@ textarea {
   grid-template-columns: 1fr auto;
 }
 
+
+.instruction-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
 .helper {
   font-size: 0.85rem;
   color: var(--muted);
