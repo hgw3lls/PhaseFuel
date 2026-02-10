@@ -692,8 +692,8 @@ export default function App() {
   };
 
 
-  const handleAddDinnerToGroceries = () => {
-    const ingredients = activeDayData?.meals?.dinner?.ingredients || [];
+  const handleAddMealToGroceries = (mealType) => {
+    const ingredients = activeDayData?.meals?.[mealType]?.ingredients || [];
     const additions = ingredients
       .map((item) => item?.trim())
       .filter(Boolean)
@@ -709,7 +709,7 @@ export default function App() {
       }));
 
     if (!additions.length) {
-      setStatus("No dinner ingredients available to add.");
+      setStatus(`No ${mealType} ingredients available to add.`);
       return;
     }
 
@@ -717,11 +717,11 @@ export default function App() {
       const existing = new Set(current.map((item) => item.name.toLowerCase()));
       const nextAdditions = additions.filter((item) => !existing.has(item.name.toLowerCase()));
       if (!nextAdditions.length) {
-        setStatus("Dinner ingredients already in grocery list.");
+        setStatus(`${formatPhase(mealType)} ingredients already in grocery list.`);
         return current;
       }
       setStatus(
-        `Added ${nextAdditions.length} dinner item${nextAdditions.length > 1 ? "s" : ""} to grocery list.`
+        `Added ${nextAdditions.length} ${mealType} item${nextAdditions.length > 1 ? "s" : ""} to grocery list.`
       );
       return [...current, ...nextAdditions];
     });
@@ -1338,15 +1338,13 @@ export default function App() {
                               >
                                 Swap meal
                               </button>
-                              {mealType === "dinner" ? (
-                                <button
-                                  type="button"
-                                  className="ghost"
-                                  onClick={handleAddDinnerToGroceries}
-                                >
-                                  Add to Grocery
-                                </button>
-                              ) : null}
+                              <button
+                                type="button"
+                                className="ghost"
+                                onClick={() => handleAddMealToGroceries(mealType)}
+                              >
+                                Add to Grocery
+                              </button>
                             </div>
                           </div>
                         );
