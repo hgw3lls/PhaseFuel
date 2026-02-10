@@ -86,6 +86,14 @@ const buildWeekdayLabels = (count) => {
   });
 };
 
+const formatDuration = (totalSeconds) => {
+  const safeSeconds = Math.max(0, totalSeconds || 0);
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+};
+
+
 const groupGroceries = (items) =>
   items.reduce((acc, item) => {
     const category = item.category || "Other";
@@ -146,6 +154,9 @@ export default function App() {
   const [lookupUserId, setLookupUserId] = useState("");
   const [savedPlan, setSavedPlan] = useState("No saved plan loaded.");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingStartedAt, setLoadingStartedAt] = useState(null);
+  const [loadingElapsedMs, setLoadingElapsedMs] = useState(0);
+  const [estimatedGenerationMs, setEstimatedGenerationMs] = useState(20000);
   const [useWhatYouHaveOverride, setUseWhatYouHaveOverride] = useState(false);
   const [activeView, setActiveView] = useState("today");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -390,7 +401,10 @@ export default function App() {
       setStatus("Datasets are still loading. Please wait a moment.");
       return;
     }
+    const generationStartedAt = Date.now();
     setIsLoading(true);
+    setLoadingStartedAt(generationStartedAt);
+    setLoadingElapsedMs(0);
     setGenerationState("generating");
     setStatus("Generating deterministic plan...");
     setPlannerError("");
@@ -488,7 +502,14 @@ export default function App() {
       setStatus(`Failed to generate plan: ${error.message}`);
       setGenerationState("error");
     } finally {
+      const generationDurationMs = Date.now() - generationStartedAt;
+      setEstimatedGenerationMs((current) => {
+        const blended = Math.round(current * 0.65 + generationDurationMs * 0.35);
+        return Math.min(60000, Math.max(6000, blended));
+      });
       setIsLoading(false);
+      setLoadingStartedAt(null);
+      setLoadingElapsedMs(0);
       setUseWhatYouHaveOverride(false);
     }
   };
