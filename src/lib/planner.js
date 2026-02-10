@@ -5,6 +5,50 @@ const normalizeName = (value) => value.toLowerCase().trim();
 
 const getRecipeIngredients = (recipe) => recipe?.ingredientTokens || recipe?.ingredients || [];
 
+const DAILY_NUTRITION_TARGETS = {
+  protein: 3,
+  fiber: 3,
+  micronutrient: 4,
+  carb: 3,
+  fat: 2,
+};
+
+const MEAL_NUTRITION_PRIORITIES = {
+  breakfast: ["protein", "fiber"],
+  lunch: ["protein", "fiber", "micronutrient"],
+  dinner: ["protein", "fiber", "micronutrient"],
+  snack: ["fiber", "protein"],
+};
+
+const buildCategoryLookup = (ingredientCatalog = []) => {
+  const map = new Map();
+  ingredientCatalog.forEach((ingredient) => {
+    const category = ingredient?.category;
+    if (!category) return;
+
+    const name = normalizeName(ingredient?.name || "");
+    if (name) map.set(name, category);
+
+    (ingredient?.aliases || []).forEach((alias) => {
+      const normalizedAlias = normalizeName(alias || "");
+      if (normalizedAlias) map.set(normalizedAlias, category);
+    });
+  });
+  return map;
+};
+
+const summarizeNutritionByCategory = (ingredients, ingredientCatalog, categoryLookup) => {
+  const summary = { protein: 0, fiber: 0, micronutrient: 0, carb: 0, fat: 0 };
+  const tokens = resolveIngredientTokens(ingredients, ingredientCatalog);
+  tokens.forEach((token) => {
+    const category = categoryLookup.get(normalizeName(token));
+    if (category && summary[category] !== undefined) {
+      summary[category] += 1;
+    }
+  });
+  return summary;
+};
+
 const scoreIngredientRepetition = (ingredients, ingredientCounts) =>
   ingredients.reduce((penalty, ingredient) => {
     const count = ingredientCounts.get(normalizeName(ingredient)) || 0;
@@ -20,6 +64,42 @@ const scoreBudgetFit = (recipe, profile) => {
   return -1;
 };
 
+const scoreNutritionFit = ({ mealType, nutritionSummary, dailyCategoryCounts }) => {
+  const priorities = MEAL_NUTRITION_PRIORITIES[mealType] || [];
+  let score = 0;
+  const rationale = [];
+
+  priorities.forEach((category) => {
+    if ((nutritionSummary[category] || 0) > 0) {
+      score += 1.2;
+    } else {
+      score -= 1.5;
+    }
+  });
+
+  if (mealType === "snack" && (nutritionSummary.fiber || 0) === 0 && (nutritionSummary.protein || 0) === 0) {
+    score -= 1;
+    rationale.push("Snack is low in protein/fiber; may be less filling.");
+  }
+
+  if (dailyCategoryCounts) {
+    Object.entries(DAILY_NUTRITION_TARGETS).forEach(([category, target]) => {
+      if ((nutritionSummary[category] || 0) === 0) return;
+      const current = dailyCategoryCounts.get(category) || 0;
+      if (current < target) {
+        score += 0.6;
+      }
+    });
+  }
+
+  const matched = priorities.filter((category) => (nutritionSummary[category] || 0) > 0);
+  if (matched.length) {
+    rationale.push(`Nutrition balance: includes ${matched.join(" & ")}.`);
+  }
+
+  return { score, rationale };
+};
+
 export const scoreRecipe = ({
   recipe,
   phase,
@@ -29,6 +109,8 @@ export const scoreRecipe = ({
   ingredientCounts,
   profile,
   ingredientCatalog,
+  dailyCategoryCounts,
+  categoryLookup,
 }) => {
   if (!recipe) return -999;
   const tokens = resolveIngredientTokens(getRecipeIngredients(recipe), ingredientCatalog);
@@ -38,6 +120,18 @@ export const scoreRecipe = ({
 
   const guidance = PHASE_GUIDANCE[phase] || { targetTags: [], avoidTags: [] };
   let score = 0;
+
+  const nutritionSummary = summarizeNutritionByCategory(
+    getRecipeIngredients(recipe),
+    ingredientCatalog,
+    categoryLookup
+  );
+  const nutritionFit = scoreNutritionFit({
+    mealType: recipe.mealType,
+    nutritionSummary,
+    dailyCategoryCounts,
+  });
+  score += nutritionFit.score;
 
   guidance.targetTags.forEach((tag) => {
     if (recipe.tags.includes(tag)) score += 2;
@@ -69,7 +163,17 @@ export const scoreRecipe = ({
   return score;
 };
 
-const buildRationale = ({ recipe, phase, symptomTags, usedCount, ingredientCounts, profile }) => {
+const buildRationale = ({
+  recipe,
+  phase,
+  symptomTags,
+  usedCount,
+  ingredientCounts,
+  profile,
+  ingredientCatalog,
+  categoryLookup,
+  dailyCategoryCounts,
+}) => {
   const guidance = PHASE_GUIDANCE[phase] || { targetTags: [] };
   const reasons = [];
   const hits = recipe.tags.filter((tag) => guidance.targetTags.includes(tag));
@@ -101,6 +205,19 @@ const buildRationale = ({ recipe, phase, symptomTags, usedCount, ingredientCount
   if (recipe.timeMinutes <= 20) {
     reasons.push("Quick prep under 20 minutes.");
   }
+
+  const nutritionSummary = summarizeNutritionByCategory(
+    getRecipeIngredients(recipe),
+    ingredientCatalog,
+    categoryLookup
+  );
+  const nutritionFit = scoreNutritionFit({
+    mealType: recipe.mealType,
+    nutritionSummary,
+    dailyCategoryCounts,
+  });
+  reasons.push(...nutritionFit.rationale);
+
   return reasons;
 };
 
@@ -116,6 +233,8 @@ const selectBestRecipe = ({
   mealType,
   maxRepeats,
   ingredientCatalog,
+  dailyCategoryCounts,
+  categoryLookup,
   excludeIds = [],
 }) => {
   const candidates = getByMealType
@@ -137,6 +256,8 @@ const selectBestRecipe = ({
       ingredientCounts,
       profile,
       ingredientCatalog,
+      dailyCategoryCounts,
+      categoryLookup,
     });
     if (score > bestScore) {
       bestScore = score;
@@ -167,6 +288,7 @@ export const generateWeeklyPlan = ({
   const ingredientCounts = new Map();
   const maxRepeats = settings.maxRepeatsPerWeek ?? 2;
   const ingredientCatalog = settings.ingredientCatalog || [];
+  const categoryLookup = buildCategoryLookup(ingredientCatalog);
 
   const startDate = startDateISO ? new Date(startDateISO) : new Date();
   const planDays = [];
@@ -177,6 +299,7 @@ export const generateWeeklyPlan = ({
     const dateISO = dayDate.toISOString().slice(0, 10);
 
     const meals = {};
+    const dailyCategoryCounts = new Map();
 
     const breakfast = selectBestRecipe({
       recipes,
@@ -190,6 +313,8 @@ export const generateWeeklyPlan = ({
       mealType: "breakfast",
       maxRepeats,
       ingredientCatalog,
+      dailyCategoryCounts,
+      categoryLookup,
     });
     if (breakfast) {
       const usedCount = usedRecipeCounts.get(breakfast.id) || 0;
@@ -206,6 +331,9 @@ export const generateWeeklyPlan = ({
           usedCount,
           ingredientCounts,
           profile,
+          ingredientCatalog,
+          categoryLookup,
+          dailyCategoryCounts,
         }),
       };
     }
@@ -222,6 +350,8 @@ export const generateWeeklyPlan = ({
       mealType: "dinner",
       maxRepeats,
       ingredientCatalog,
+      dailyCategoryCounts,
+      categoryLookup,
     });
     if (dinner) {
       const usedCount = usedRecipeCounts.get(dinner.id) || 0;
@@ -238,6 +368,9 @@ export const generateWeeklyPlan = ({
           usedCount,
           ingredientCounts,
           profile,
+          ingredientCatalog,
+          categoryLookup,
+          dailyCategoryCounts,
         }),
       };
     }
@@ -264,6 +397,8 @@ export const generateWeeklyPlan = ({
         mealType: "lunch",
         maxRepeats,
         ingredientCatalog,
+        dailyCategoryCounts,
+        categoryLookup,
       });
       if (lunch) {
         const usedCount = usedRecipeCounts.get(lunch.id) || 0;
@@ -280,6 +415,9 @@ export const generateWeeklyPlan = ({
             usedCount,
             ingredientCounts,
             profile,
+            ingredientCatalog,
+            categoryLookup,
+            dailyCategoryCounts,
           }),
         };
       }
@@ -298,6 +436,8 @@ export const generateWeeklyPlan = ({
         mealType: "snack",
         maxRepeats,
         ingredientCatalog,
+        dailyCategoryCounts,
+        categoryLookup,
       });
       if (snack) {
         const usedCount = usedRecipeCounts.get(snack.id) || 0;
@@ -314,6 +454,9 @@ export const generateWeeklyPlan = ({
             usedCount,
             ingredientCounts,
             profile,
+            ingredientCatalog,
+            categoryLookup,
+            dailyCategoryCounts,
           }),
         };
       }
@@ -324,6 +467,10 @@ export const generateWeeklyPlan = ({
       resolveIngredientTokens(meal.ingredients, ingredientCatalog).forEach((token) => {
         const key = normalizeName(token);
         ingredientCounts.set(key, (ingredientCounts.get(key) || 0) + 1);
+        const category = categoryLookup.get(key);
+        if (category) {
+          dailyCategoryCounts.set(category, (dailyCategoryCounts.get(category) || 0) + 1);
+        }
       });
     });
 
@@ -359,6 +506,9 @@ export const swapMealInPlan = ({
   const usedRecipeCounts = new Map();
   const ingredientCounts = new Map();
   const maxRepeats = settings.maxRepeatsPerWeek ?? 2;
+  const categoryLookup = buildCategoryLookup(ingredientCatalog);
+  const currentMeal = plan.days[dayIndex].meals[mealType];
+  const dailyCategoryCounts = new Map();
 
   plan.days.forEach((day, index) => {
     Object.values(day.meals || {}).forEach((meal) => {
@@ -367,13 +517,17 @@ export const swapMealInPlan = ({
       resolveIngredientTokens(meal.ingredients, ingredientCatalog).forEach((token) => {
         const key = normalizeName(token);
         ingredientCounts.set(key, (ingredientCounts.get(key) || 0) + 1);
+        if (index === dayIndex) {
+          const category = categoryLookup.get(key);
+          if (category) {
+            dailyCategoryCounts.set(category, (dailyCategoryCounts.get(category) || 0) + 1);
+          }
+        }
       });
     });
   });
 
-  const excludeIds = plan.days.flatMap((day) =>
-    Object.values(day.meals || {}).map((meal) => meal.recipeId)
-  );
+  const excludeIds = currentMeal?.recipeId ? [currentMeal.recipeId] : [];
 
   const replacement = selectBestRecipe({
     recipes,
@@ -387,6 +541,8 @@ export const swapMealInPlan = ({
     mealType,
     maxRepeats,
     ingredientCatalog,
+    dailyCategoryCounts,
+    categoryLookup,
     excludeIds,
   });
 
@@ -407,6 +563,9 @@ export const swapMealInPlan = ({
       usedCount,
       ingredientCounts,
       profile,
+      ingredientCatalog,
+      categoryLookup,
+      dailyCategoryCounts,
     }),
   };
 
