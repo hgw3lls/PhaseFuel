@@ -150,6 +150,7 @@ export default function App() {
   const [activeView, setActiveView] = useState("today");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activePlanDay, setActivePlanDay] = useState(null);
+  const [activeRecipeMealType, setActiveRecipeMealType] = useState(null);
   const [planDays, setPlanDays] = useState(7);
   const [dietaryPreferences, setDietaryPreferences] = useState("");
   const [cuisinePreferences, setCuisinePreferences] = useState("");
@@ -264,6 +265,10 @@ export default function App() {
       setActivePlanDay((current) => (current ?? 0));
     }
   }, [weeklyPlan]);
+
+  useEffect(() => {
+    setActiveRecipeMealType(null);
+  }, [activePlanDay, weeklyPlan]);
 
 
   const handleSettingsChange = (key, value) => {
@@ -732,6 +737,18 @@ export default function App() {
   }));
 
   const activeDayData = weeklyPlan?.days?.[activePlanDay] || null;
+  const activeRecipeMeal =
+    activeRecipeMealType && activeDayData?.meals ? activeDayData.meals[activeRecipeMealType] : null;
+  const activeRecipeDetails =
+    activeRecipeMeal?.recipeId && recipes.length
+      ? recipes.find((recipe) => recipe.id === activeRecipeMeal.recipeId) || null
+      : null;
+  const activeRecipeName =
+    activeRecipeDetails?.name || activeRecipeDetails?.title || activeRecipeMeal?.name || "Recipe";
+  const activeRecipeIngredients =
+    activeRecipeDetails?.ingredientTokens || activeRecipeMeal?.ingredients || [];
+  const activeRecipeSteps =
+    activeRecipeDetails?.steps || activeRecipeDetails?.instructions || [];
 
   const groceryGroups = groupGroceries(groceryList);
   const groceryCount = groceryList.length;
@@ -1137,6 +1154,7 @@ export default function App() {
                       .filter((mealType) => activeDayData.meals[mealType])
                       .map((mealType) => {
                         const meal = activeDayData.meals[mealType];
+                        const isRecipeOpen = activeRecipeMealType === mealType;
                         return (
                           <div className="meal-card" key={mealType}>
                             <div>
@@ -1145,9 +1163,19 @@ export default function App() {
                                 <span className="tag">{mealType}</span>
                                 <span className="tag">{formatPhase(cycleInfo.phase)} phase</span>
                               </div>
-                              {renderMealIngredients(meal.ingredients)}
                             </div>
                             <div className="card-actions">
+                              <button
+                                type="button"
+                                className="ghost"
+                                onClick={() =>
+                                  setActiveRecipeMealType((current) =>
+                                    current === mealType ? null : mealType
+                                  )
+                                }
+                              >
+                                {isRecipeOpen ? "Hide recipe" : "View recipe"}
+                              </button>
                               <button
                                 type="button"
                                 className="ghost"
@@ -1171,6 +1199,36 @@ export default function App() {
                   ) : (
                     <p>Select a day to view details.</p>
                   )}
+
+                  {activeRecipeMeal ? (
+                    <div className="meal-card recipe-details-card">
+                      <div>
+                        <h4>{activeRecipeName}</h4>
+                        <div className="tag-row">
+                          <span className="tag">{activeRecipeMealType}</span>
+                          {activeRecipeDetails?.timeMinutes ? (
+                            <span className="tag">{activeRecipeDetails.timeMinutes} min</span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div>
+                        <h5>Ingredients</h5>
+                        {renderMealIngredients(activeRecipeIngredients)}
+                      </div>
+                      <div>
+                        <h5>Instructions</h5>
+                        {activeRecipeSteps.length ? (
+                          <ol className="instruction-list">
+                            {activeRecipeSteps.map((step, index) => (
+                              <li key={`${activeRecipeMeal.recipeId}-step-${index}`}>{step}</li>
+                            ))}
+                          </ol>
+                        ) : (
+                          <p className="helper">No detailed instructions available for this recipe.</p>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="why-panel">
