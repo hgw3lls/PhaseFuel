@@ -208,6 +208,13 @@ export default function App() {
   const [plannerError, setPlannerError] = useState("");
   const [planNarrative, setPlanNarrative] = useState(null);
   const [groceryList, setGroceryList] = useState([]);
+  const [manualGroceryInput, setManualGroceryInput] = useState({
+    name: "",
+    qty: "",
+    unit: "",
+    category: "",
+  });
+  const [grocerySearchQuery, setGrocerySearchQuery] = useState("");
   const [prepSteps, setPrepSteps] = useState([]);
   const [estimatedCost, setEstimatedCost] = useState(null);
   const [lookupUserId, setLookupUserId] = useState("");
@@ -651,6 +658,60 @@ export default function App() {
     setGroceryChecks({});
   };
 
+  const handleRemoveGroceryItem = (itemToRemove) => {
+    const key = `${itemToRemove.category}-${itemToRemove.name}`;
+    setGroceryList((current) =>
+      current.filter(
+        (item) =>
+          !(
+            item.name === itemToRemove.name &&
+            (item.category || "Other") === (itemToRemove.category || "Other")
+          )
+      )
+    );
+    setGroceryChecks((current) => {
+      if (!current[key]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    setStatus(`Removed ${itemToRemove.name} from grocery list.`);
+  };
+
+  const handleManualGroceryAdd = (event) => {
+    event.preventDefault();
+    const normalizedName = manualGroceryInput.name.trim();
+    if (!normalizedName) {
+      setStatus("Enter an item name to add to groceries.");
+      return;
+    }
+
+    const manualItem = {
+      name: normalizedName,
+      qty: manualGroceryInput.qty.trim(),
+      unit: manualGroceryInput.unit.trim(),
+      category: formatCategory(manualGroceryInput.category.trim() || "Other"),
+    };
+
+    setGroceryList((current) => {
+      const alreadyExists = current.some(
+        (item) =>
+          item.name.toLowerCase() === manualItem.name.toLowerCase() &&
+          (item.category || "Other").toLowerCase() === manualItem.category.toLowerCase()
+      );
+      if (alreadyExists) {
+        setStatus(`${manualItem.name} is already in grocery list.`);
+        return current;
+      }
+      setStatus(`Added ${manualItem.name} to grocery list.`);
+      return [...current, manualItem];
+    });
+
+    setManualGroceryInput({ name: "", qty: "", unit: "", category: "" });
+  };
+
   const handleNav = (view) => {
     setActiveView(view);
     setDrawerOpen(false);
@@ -855,6 +916,17 @@ export default function App() {
     activeRecipeDetails?.steps || activeRecipeDetails?.instructions || [];
 
   const groceryGroups = groupGroceries(groceryList);
+  const filteredGroceryGroups = Object.fromEntries(
+    Object.entries(groceryGroups)
+      .map(([category, items]) => {
+        const filteredItems = items.filter((item) => {
+          const text = `${item.name} ${item.qty} ${item.unit} ${category}`.toLowerCase();
+          return text.includes(grocerySearchQuery.trim().toLowerCase());
+        });
+        return [category, filteredItems];
+      })
+      .filter(([, items]) => items.length)
+  );
   const groceryCount = groceryList.length;
   const groceryTotals = null;
 
@@ -1412,7 +1484,12 @@ export default function App() {
             <div className="section-header">
               <h2>GROCERY</h2>
               <div className="search-row">
-                <input type="search" placeholder="Search groceries" />
+                <input
+                  type="search"
+                  placeholder="Search groceries"
+                  value={grocerySearchQuery}
+                  onChange={(event) => setGrocerySearchQuery(event.target.value)}
+                />
                 <button type="button" className="ghost" onClick={handleCopyGroceries}>
                   Copy
                 </button>
@@ -1421,9 +1498,56 @@ export default function App() {
                 </button>
               </div>
             </div>
+            <form className="form-grid" onSubmit={handleManualGroceryAdd}>
+              <label>
+                Item
+                <input
+                  type="text"
+                  placeholder="Add manual grocery item"
+                  value={manualGroceryInput.name}
+                  onChange={(event) =>
+                    setManualGroceryInput((current) => ({ ...current, name: event.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Qty
+                <input
+                  type="text"
+                  value={manualGroceryInput.qty}
+                  onChange={(event) =>
+                    setManualGroceryInput((current) => ({ ...current, qty: event.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Unit
+                <input
+                  type="text"
+                  value={manualGroceryInput.unit}
+                  onChange={(event) =>
+                    setManualGroceryInput((current) => ({ ...current, unit: event.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Category
+                <input
+                  type="text"
+                  placeholder="Produce, Dairy..."
+                  value={manualGroceryInput.category}
+                  onChange={(event) =>
+                    setManualGroceryInput((current) => ({ ...current, category: event.target.value }))
+                  }
+                />
+              </label>
+              <button type="submit" className="primary-button">
+                Add Item
+              </button>
+            </form>
             <div className="accordion-stack">
-              {Object.entries(groceryGroups).length ? (
-                Object.entries(groceryGroups).map(([category, items]) => (
+              {Object.entries(filteredGroceryGroups).length ? (
+                Object.entries(filteredGroceryGroups).map(([category, items]) => (
                   <details className="accordion" key={category} open>
                     <summary>{category.toUpperCase()}</summary>
                     <div className="accordion-body">
@@ -1442,6 +1566,13 @@ export default function App() {
                                 {item.qty} {item.unit}
                               </span>
                             </span>
+                            <button
+                              type="button"
+                              className="ghost"
+                              onClick={() => handleRemoveGroceryItem(item)}
+                            >
+                              Remove
+                            </button>
                           </label>
                         );
                       })}
