@@ -428,7 +428,7 @@ export default function App() {
     setLoadingStartedAt(generationStartedAt);
     setLoadingElapsedMs(0);
     setGenerationState("generating");
-    setStatus("Generating deterministic plan...");
+    setStatus("Generating personalized plan...");
     setPlannerError("");
     await waitForNextPaint();
 

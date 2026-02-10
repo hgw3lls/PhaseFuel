@@ -61,7 +61,7 @@ const buildPrompt = ({ profileSummary, weekStartISO, weeklyPlanJson, allowedToke
 };
 
 const fallbackResponse = (reason = "AI unavailable") => ({
-  summaryText: `Deterministic plan generated. ${reason}. Not medical advice.`,
+  summaryText: `Personalized plan generated. ${reason}. Not medical advice.`,
   dayNotes: [],
   groceryByAisle: [],
   substitutions: [],
