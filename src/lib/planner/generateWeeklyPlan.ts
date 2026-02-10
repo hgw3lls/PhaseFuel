@@ -1,5 +1,6 @@
 import type { DailyLog, MealType, PlannedMeal, Recipe, WeeklyPlan } from "./types";
 import { estimatePhase } from "../cycle";
+import type { IngredientRecord } from "../diet";
 import { compileAllowed, resolveIngredientTokens } from "../diet";
 import { normalizeSymptomTags } from "./guidance";
 import { scoreRecipe } from "./scoring";
@@ -12,11 +13,13 @@ const addDays = (dateISO: string, offset: number) => {
 
 const mealTypes: MealType[] = ["breakfast", "lunch", "dinner", "snack"];
 
+const getRecipeIngredients = (recipe: Recipe) => recipe.ingredientTokens || recipe.ingredients || [];
+
 const buildMeal = (recipe: Recipe, rationale: string[]): PlannedMeal => ({
   recipeId: recipe.id,
   name: recipe.name,
   mealType: recipe.mealType,
-  ingredients: recipe.ingredients,
+  ingredients: getRecipeIngredients(recipe),
   tags: recipe.tags,
   rationale,
 });
@@ -35,9 +38,10 @@ export const generateWeeklyPlan = (
     lowFodmapMode: "off" | "moderate" | "strict";
   } & Parameters<typeof scoreRecipe>[0]["profile"],
   recipes: Recipe[],
+  getByMealType: ((mealType: MealType) => Recipe[]) | null,
   weekStartISO: string,
   dailyLogs: DailyLog[],
-  ingredientCatalog: { token: string; aliases: string[]; gluten: boolean; fodmap: string; animal: string }[]
+  ingredientCatalog: IngredientRecord[]
 ): WeeklyPlan => {
   const usedRecipeCounts = new Map<string, number>();
   const ingredientCounts = new Map<string, number>();
@@ -67,7 +71,7 @@ export const generateWeeklyPlan = (
     };
 
     mealTypes.forEach((mealType) => {
-      const candidates = recipes.filter((recipe) => recipe.mealType === mealType);
+      const candidates = getByMealType ? getByMealType(mealType) : recipes.filter((recipe) => recipe.mealType === mealType);
       let bestScore = -Infinity;
       let bestRecipe: Recipe | null = null;
       let bestRationale: string[] = [];
@@ -94,7 +98,7 @@ export const generateWeeklyPlan = (
       if (bestRecipe) {
         meals[mealType] = buildMeal(bestRecipe, bestRationale);
         usedRecipeCounts.set(bestRecipe.id, (usedRecipeCounts.get(bestRecipe.id) || 0) + 1);
-        resolveIngredientTokens(bestRecipe.ingredients, ingredientCatalog).forEach((token) => {
+        resolveIngredientTokens(getRecipeIngredients(bestRecipe), ingredientCatalog).forEach((token) => {
           const key = token.toLowerCase().trim();
           ingredientCounts.set(key, (ingredientCounts.get(key) || 0) + 1);
         });

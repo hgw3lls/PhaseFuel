@@ -317,6 +317,35 @@ textarea {
   font-size: 0.7rem;
 }
 
+.badge {
+  border: var(--borderWidth) solid var(--border);
+  padding: 0.2rem 0.4rem;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  background: #fff7f2;
+}
+
+.badge-protein {
+  background: #fff2f2;
+}
+
+.badge-carb {
+  background: #fff7e6;
+}
+
+.badge-fat {
+  background: #fdf2ff;
+}
+
+.badge-fiber {
+  background: #f1fbf3;
+}
+
+.badge-micronutrient {
+  background: #eef6ff;
+}
+
 .alert {
   border: var(--borderWidth) solid var(--accent);
   padding: 0.75rem;
@@ -390,6 +419,35 @@ textarea {
   height: 10px;
   border-radius: 50%;
   background: var(--accent);
+}
+
+.ingredient-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.chip-action {
+  font-size: 0.85rem;
+}
+
+.ingredient-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.ingredient-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ingredient-name {
+  font-weight: 700;
 }
 
 .plan-section {
@@ -610,6 +668,73 @@ textarea {
   gap: 0.5rem;
 }
 
+.search-row.compact {
+  grid-template-columns: 1fr auto;
+}
+
+.helper {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.helper.error {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.recipe-finder {
+  display: grid;
+  gap: 1rem;
+}
+
+.filter-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.filter-group {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.suggestions {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: var(--borderWidth) solid var(--border);
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.match-summary {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.recipe-results {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.recipe-result {
+  border: var(--borderWidth) solid var(--border);
+  padding: 0.75rem;
+  background: var(--surface);
+}
+
 .accordion-stack {
   display: grid;
   gap: 1rem;
@@ -819,4 +944,15 @@ textarea {
   .flow-arrow {
     transform: rotate(90deg);
   }
+}
+
+.recipe-finder-skeleton {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.skeleton-line {
+  height: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(90deg, #f3f1ef 0%, #faf8f6 50%, #f3f1ef 100%);
 }

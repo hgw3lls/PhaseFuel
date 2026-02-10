@@ -7,6 +7,8 @@ export interface Recipe {
   name: string;
   mealType: MealType;
   ingredients: string[];
+  ingredientTokens?: string[];
+  ingredientIds?: string[];
   tags: string[];
   timeMinutes: number;
   costLevel: "budget" | "balanced" | "premium";

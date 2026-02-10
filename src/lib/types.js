@@ -32,6 +32,8 @@
  * @property {string} name
  * @property {"breakfast"|"lunch"|"dinner"|"snack"} mealType
  * @property {string[]} ingredients
+ * @property {string[]} [ingredientTokens]
+ * @property {string[]} [ingredientIds]
  * @property {string[]} tags
  * @property {number} timeMinutes
  * @property {"budget"|"balanced"|"premium"} costLevel

@@ -12,6 +12,7 @@ export const runPlannerDemo = () => {
   const plan = generateWeeklyPlan(
     sampleProfile,
     sampleRecipes,
+    null,
     weekStartISO,
     dailyLogs,
     ingredientCatalog

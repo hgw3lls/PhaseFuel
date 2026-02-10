@@ -8,6 +8,28 @@ const DIET_EXCLUSIONS = {
 
 const normalizeName = (value) => value.toLowerCase().trim();
 
+const buildLookup = (catalog) => {
+  const lookup = new Map();
+  catalog.forEach((record) => {
+    const token = normalizeName(record.token || record.name || "");
+    if (!token) return;
+    lookup.set(token, record);
+    (record.aliases || []).forEach((alias) => {
+      lookup.set(normalizeName(alias), record);
+    });
+  });
+  return lookup;
+};
+
+export const resolveIngredientTokens = (ingredients, catalog = []) => {
+  const lookup = buildLookup(catalog);
+  return ingredients.map((ingredient) => {
+    const key = normalizeName(ingredient);
+    const record = lookup.get(key);
+    return normalizeName(record?.token || record?.name || "") || key;
+  });
+};
+
 export const compileAllowed = (profile, ingredientCatalog = []) => {
   const allowedIngredients = new Set();
   const forbiddenIngredients = new Set();
@@ -19,8 +41,9 @@ export const compileAllowed = (profile, ingredientCatalog = []) => {
   const includeCaution = strictness < 0.6;
 
   ingredientCatalog.forEach((ingredient) => {
-    const name = normalizeName(ingredient.name);
-    const fodmap = ingredient.fodmapLevel || "low";
+    const name = normalizeName(ingredient.name || ingredient.token || "");
+    if (!name) return;
+    const fodmap = ingredient.fodmap || ingredient.fodmapLevel || "low";
     const isCaution = fodmap === "caution";
     const isHigh = fodmap === "high";
 
@@ -33,8 +56,10 @@ export const compileAllowed = (profile, ingredientCatalog = []) => {
     }
 
     if (profile?.glutenFree) {
-      const hasUnsafeOats = name.includes("oats") && ingredient.glutenFreeSafe !== true;
-      if (GLUTEN_GRAINS.some((grain) => name.includes(grain)) || hasUnsafeOats) {
+      const glutenSafe = ingredient.glutenFreeSafe === true;
+      const hasUnsafeOats = name.includes("oats") && !glutenSafe;
+      const gluten = Boolean(ingredient.gluten);
+      if (gluten || GLUTEN_GRAINS.some((grain) => name.includes(grain)) || hasUnsafeOats) {
         forbiddenIngredients.add(name);
         return;
       }

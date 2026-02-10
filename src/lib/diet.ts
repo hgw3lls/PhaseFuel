@@ -1,9 +1,13 @@
 export type IngredientRecord = {
-  token: string;
-  aliases: string[];
-  gluten: boolean;
-  fodmap: "low" | "caution" | "high";
-  animal: "none" | "fish" | "meat" | "dairy" | "egg";
+  id?: string;
+  name?: string;
+  token?: string;
+  aliases?: string[];
+  gluten?: boolean;
+  glutenFreeSafe?: boolean;
+  fodmap?: "low" | "caution" | "high";
+  fodmapLevel?: "low" | "caution" | "high";
+  animal?: "none" | "fish" | "meat" | "dairy" | "egg";
   notes?: string;
 };
 
@@ -14,8 +18,10 @@ const normalize = (value: string) => value.toLowerCase().trim();
 const buildLookup = (catalog: IngredientRecord[]) => {
   const lookup = new Map<string, IngredientRecord>();
   catalog.forEach((record) => {
-    lookup.set(normalize(record.token), record);
-    record.aliases.forEach((alias) => {
+    const token = normalize(record.token || record.name || "");
+    if (!token) return;
+    lookup.set(token, record);
+    (record.aliases || []).forEach((alias) => {
       lookup.set(normalize(alias), record);
     });
   });
@@ -29,7 +35,8 @@ export const resolveIngredientTokens = (
   const lookup = buildLookup(catalog);
   return ingredients.map((ingredient) => {
     const key = normalize(ingredient);
-    return lookup.get(key)?.token ?? key;
+    const record = lookup.get(key);
+    return normalize(record?.token || record?.name || "") || key;
   });
 };
 
@@ -47,11 +54,16 @@ export const compileAllowed = (
   const warnings: string[] = [];
 
   ingredientCatalog.forEach((ingredient) => {
-    const token = normalize(ingredient.token);
+    const token = normalize(ingredient.token || ingredient.name || "");
+    if (!token) return;
+    const fodmap = ingredient.fodmap || ingredient.fodmapLevel || "low";
+    const animal = ingredient.animal || "none";
+    const gluten = Boolean(ingredient.gluten);
+    const glutenSafe = ingredient.glutenFreeSafe === true;
 
     if (profile.glutenFree) {
-      const isUnsafeOats = token === "oats" && ingredient.gluten;
-      if (ingredient.gluten || isUnsafeOats) {
+      const isUnsafeOats = token === "oats" && !glutenSafe;
+      if (gluten || isUnsafeOats) {
         forbiddenTokens.add(token);
         if (isUnsafeOats) {
           warnings.push("Oats can be unsafe unless explicitly gluten-free.");
@@ -60,37 +72,37 @@ export const compileAllowed = (
       }
     }
 
-    if (strictness === "strict" && ingredient.fodmap !== "low") {
+    if (strictness === "strict" && fodmap !== "low") {
       forbiddenTokens.add(token);
-      if (ingredient.fodmap === "caution") {
+      if (fodmap === "caution") {
         cautionTokens.add(token);
       }
       return;
     }
 
-    if (strictness === "moderate" && ingredient.fodmap === "high") {
+    if (strictness === "moderate" && fodmap === "high") {
       forbiddenTokens.add(token);
       return;
     }
 
-    if (ingredient.fodmap === "caution") {
+    if (fodmap === "caution") {
       cautionTokens.add(token);
     }
 
-    if (profile.dietPattern === "vegan" && ingredient.animal !== "none") {
+    if (profile.dietPattern === "vegan" && animal !== "none") {
       forbiddenTokens.add(token);
       return;
     }
 
     if (
       profile.dietPattern === "vegetarian" &&
-      (ingredient.animal === "meat" || ingredient.animal === "fish")
+      (animal === "meat" || animal === "fish")
     ) {
       forbiddenTokens.add(token);
       return;
     }
 
-    if (profile.dietPattern === "pescatarian" && ingredient.animal === "meat") {
+    if (profile.dietPattern === "pescatarian" && animal === "meat") {
       forbiddenTokens.add(token);
       return;
     }
