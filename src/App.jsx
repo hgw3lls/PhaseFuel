@@ -283,20 +283,6 @@ export default function App() {
   }, [activePlanDay, weeklyPlan]);
 
 
-  useEffect(() => {
-    if (!isLoading || !loadingStartedAt) {
-      return undefined;
-    }
-
-    const timer = setInterval(() => {
-      setLoadingElapsedMs(Date.now() - loadingStartedAt);
-    }, 200);
-
-    return () => {
-      clearInterval(timer);
-    };
-  }, [isLoading, loadingStartedAt]);
-
   const handleSettingsChange = (key, value) => {
     updateSettings({ [key]: value });
   };
@@ -786,20 +772,11 @@ export default function App() {
       ? recipes.find((recipe) => recipe.id === activeRecipeMeal.recipeId) || null
       : null;
   const activeRecipeName =
-    activeRecipeDetails?.name || activeRecipeDetails?.title || getMealDisplayName(activeRecipeMeal);
+    activeRecipeDetails?.name || activeRecipeDetails?.title || activeRecipeMeal?.name || "Recipe";
   const activeRecipeIngredients =
     activeRecipeDetails?.ingredientTokens || activeRecipeMeal?.ingredients || [];
   const activeRecipeSteps =
     activeRecipeDetails?.steps || activeRecipeDetails?.instructions || [];
-
-  const loadingProgressPercent = isLoading
-    ? Math.min(95, Math.round((loadingElapsedMs / Math.max(estimatedGenerationMs, 1)) * 100))
-    : 0;
-  const loadingElapsedSeconds = Math.floor(loadingElapsedMs / 1000);
-  const loadingRemainingSeconds = Math.max(
-    0,
-    Math.ceil((estimatedGenerationMs - loadingElapsedMs) / 1000)
-  );
 
   const groceryGroups = groupGroceries(groceryList);
   const groceryCount = groceryList.length;
@@ -978,9 +955,7 @@ export default function App() {
                 </button>
                 {isLoading ? (
                   <p className="helper" role="status" aria-live="polite">
-                    Generating plan… elapsed {formatDuration(loadingElapsedSeconds)} • about {formatDuration(
-                      loadingRemainingSeconds
-                    )} remaining.
+                    Please wait while your plan is being generated.
                   </p>
                 ) : null}
               </form>
@@ -1190,17 +1165,6 @@ export default function App() {
               <div className="loading-state" role="status" aria-live="polite">
                 <div className="loading-spinner" aria-hidden="true" />
                 <p>Generating your plan. This can take a moment.</p>
-                <div className="progress-track" aria-hidden="true">
-                  <div
-                    className="progress-fill"
-                    style={{ width: `${loadingProgressPercent}%` }}
-                  />
-                </div>
-                <div className="progress-stats">
-                  <span>{loadingProgressPercent}% complete</span>
-                  <span>Elapsed {formatDuration(loadingElapsedSeconds)}</span>
-                  <span>ETA {formatDuration(loadingRemainingSeconds)}</span>
-                </div>
               </div>
             ) : weeklyPlan ? (
               <>
