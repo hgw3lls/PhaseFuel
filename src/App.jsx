@@ -4,10 +4,14 @@ import { estimatePhase } from "./lib/cycle.js";
 import { getMoonPhaseBucket } from "./lib/moon.js";
 import { computeSyncScore } from "./lib/sync.js";
 import {
-  loadIngredientCatalog,
-  loadIngredientCategories,
-  loadRecipes,
-} from "./lib/recipesStore.js";
+  getIngredient,
+  resolveIngredientId,
+  searchIngredients,
+} from "./data/ingredients";
+import { getMatchingRecipes } from "./data/query";
+import { warmPhaseFuelData } from "./data/warmup";
+import { toRecipeCard } from "./data/viewModel";
+import DatasetDiagnostics from "./dev/DatasetDiagnostics";
 import { generateWeeklyPlan, swapMealInPlan } from "./lib/planner.js";
 import { buildFallbackNarrative, requestPlanNarrative } from "./lib/ai.js";
 import { validatePlan } from "./lib/validatePlan.js";
@@ -70,6 +74,8 @@ const getStoredChecks = () => {
 };
 
 const formatPhase = (value) => (value ? `${value[0].toUpperCase()}${value.slice(1)}` : "Unknown");
+const formatCategory = (value) =>
+  value ? `${value[0].toUpperCase()}${value.slice(1)}` : "Other";
 
 const buildWeekdayLabels = (count) => {
   const today = new Date();
@@ -90,15 +96,8 @@ const groupGroceries = (items) =>
     return acc;
   }, {});
 
-const buildGroceryList = (plan, ingredientCategories) => {
+const buildGroceryList = (plan) => {
   const counts = new Map();
-  const categoryMap = new Map();
-
-  Object.entries(ingredientCategories || {}).forEach(([category, items]) => {
-    items.forEach((item) => {
-      categoryMap.set(item.toLowerCase(), category);
-    });
-  });
 
   plan?.days?.forEach((day) => {
     Object.values(day.meals || {}).forEach((meal) => {
@@ -113,7 +112,11 @@ const buildGroceryList = (plan, ingredientCategories) => {
     name,
     qty: count > 1 ? String(count) : "",
     unit: "",
-    category: categoryMap.get(name.toLowerCase()) || "Other",
+    category: (() => {
+      const ingredientId = resolveIngredientId(name);
+      const category = ingredientId ? getIngredient(ingredientId)?.category : null;
+      return formatCategory(category);
+    })(),
   }));
 };
 
@@ -121,9 +124,7 @@ export default function App() {
   const [userId, setUserId] = useState("");
   const [cycleDay, setCycleDay] = useState("");
   const [symptoms, setSymptoms] = useState("");
-  const [recipes] = useState(() => loadRecipes());
-  const [ingredientCatalog] = useState(() => loadIngredientCatalog());
-  const [ingredientCategories] = useState(() => loadIngredientCategories());
+  const [dataState, setDataState] = useState({ status: "loading", data: null, error: null });
   const [pantryItems, setPantryItems] = useState(() =>
     typeof loadPantry === "function" ? loadPantry() : []
   );
@@ -153,10 +154,46 @@ export default function App() {
   const [dietaryPreferences, setDietaryPreferences] = useState("");
   const [cuisinePreferences, setCuisinePreferences] = useState("");
   const [foodAvoidances, setFoodAvoidances] = useState("");
+  const [filterMealType, setFilterMealType] = useState("");
+  const [filterDietFlags, setFilterDietFlags] = useState([]);
+  const [filterIngredientQuery, setFilterIngredientQuery] = useState("");
+  const [filterIngredientSuggestions, setFilterIngredientSuggestions] = useState([]);
+  const [filterIngredientIds, setFilterIngredientIds] = useState([]);
+  const [filterError, setFilterError] = useState("");
   const [groceryChecks, setGroceryChecks] = useState(() => getStoredChecks());
   const { settings, setSettings, updateSettings } = useSettings();
 
+  const data = dataState.data;
+  const recipes = data?.recipes || [];
+  const ingredientCatalog = data?.ingredients || [];
+  const dietFlagOptions = data?.dietFlags || [];
+  const mealTypeOptions = data?.mealTypes || ["breakfast", "lunch", "dinner", "snack"];
+  const isDataReady = dataState.status === "ready";
+
   const plansByUser = useMemo(() => getStoredPlans(), [weeklyPlan, savedPlan]);
+  const selectedIngredients = useMemo(
+    () =>
+      filterIngredientIds
+        .map((id) => getIngredient(id))
+        .filter((ingredient) => Boolean(ingredient)),
+    [filterIngredientIds, isDataReady]
+  );
+  const filteredRecipes = useMemo(() => {
+    if (!isDataReady) {
+      return { total: 0, items: [] };
+    }
+
+    const matches = getMatchingRecipes({
+      mealType: filterMealType || undefined,
+      dietFlags: filterDietFlags.length ? filterDietFlags : undefined,
+      ingredientIds: filterIngredientIds.length ? filterIngredientIds : undefined,
+    });
+
+    return {
+      total: matches.length,
+      items: matches.slice(0, 20).map((recipe) => toRecipeCard(recipe)),
+    };
+  }, [isDataReady, filterMealType, filterDietFlags, filterIngredientIds]);
   const pantryFirst = settings.featureFlags.enableUseWhatYouHaveMode || useWhatYouHaveOverride;
   const cycleInfo = useMemo(
     () => estimatePhase(new Date().toISOString(), settings.cyclePreferences, settings.cycleMode),
@@ -167,6 +204,40 @@ export default function App() {
     () => computeSyncScore(cycleInfo.phase, Math.floor((moonInfo.age / 29.53) * 8)),
     [cycleInfo.phase, moonInfo.age]
   );
+
+  useEffect(() => {
+    let isActive = true;
+    warmPhaseFuelData()
+      .then((loaded) => {
+        if (isActive) {
+          setDataState({ status: "ready", data: loaded, error: null });
+        }
+      })
+      .catch((error) => {
+        if (isActive) {
+          setDataState({ status: "error", data: null, error });
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (dataState.status === "error" && dataState.error) {
+      setStatus(`Failed to load datasets: ${dataState.error.message}`);
+    }
+  }, [dataState.status, dataState.error]);
+
+  useEffect(() => {
+    if (!isDataReady || !filterIngredientQuery.trim()) {
+      setFilterIngredientSuggestions([]);
+      return;
+    }
+
+    setFilterIngredientSuggestions(searchIngredients(filterIngredientQuery, 8));
+  }, [isDataReady, filterIngredientQuery]);
 
   useEffect(() => {
     savePantry(pantryItems);
@@ -262,6 +333,38 @@ export default function App() {
     ingredientCatalog,
   });
 
+  const toggleDietFlag = (flag) => {
+    setFilterDietFlags((current) =>
+      current.includes(flag) ? current.filter((item) => item !== flag) : [...current, flag]
+    );
+  };
+
+  const addIngredientFilter = (ingredient) => {
+    if (!ingredient?.id) return;
+    setFilterIngredientIds((current) =>
+      current.includes(ingredient.id) ? current : [...current, ingredient.id]
+    );
+    setFilterIngredientQuery("");
+    setFilterIngredientSuggestions([]);
+    setFilterError("");
+  };
+
+  const handleAddIngredientFilter = () => {
+    if (!isDataReady) return;
+    const ingredientId = resolveIngredientId(filterIngredientQuery);
+    if (!ingredientId) {
+      setFilterError("No ingredient match found.");
+      return;
+    }
+
+    const ingredient = getIngredient(ingredientId);
+    addIngredientFilter(ingredient || { id: ingredientId });
+  };
+
+  const removeIngredientFilter = (ingredientId) => {
+    setFilterIngredientIds((current) => current.filter((id) => id !== ingredientId));
+  };
+
   const handleUseWhatYouHave = () => {
     if (settings.featureFlags.enablePantryTracking && pantryItems.length < 5) {
       setStatus("Add at least 5 pantry items to use this override.");
@@ -275,6 +378,10 @@ export default function App() {
   const generatePlan = async () => {
     if (!userId.trim()) {
       setStatus("Please enter a user ID.");
+      return;
+    }
+    if (!data) {
+      setStatus("Datasets are still loading. Please wait a moment.");
       return;
     }
     setIsLoading(true);
@@ -301,6 +408,7 @@ export default function App() {
 
       let nextPlan = generateWeeklyPlan({
         recipes,
+        getByMealType: data.getByMealType,
         profile,
         phase: cycleInfo.phase,
         symptoms: symptomList,
@@ -317,6 +425,7 @@ export default function App() {
       if (!validation.valid) {
         nextPlan = generateWeeklyPlan({
           recipes,
+          getByMealType: data.getByMealType,
           profile,
           phase: cycleInfo.phase,
           symptoms: symptomList,
@@ -325,7 +434,7 @@ export default function App() {
         });
       }
 
-      const nextGrocery = buildGroceryList(nextPlan, ingredientCategories);
+      const nextGrocery = buildGroceryList(nextPlan);
       const pantryAdjusted = useWhatYouHaveMode
         ? adjustGroceryListForPantry(nextGrocery, pantryItems)
         : nextGrocery;
@@ -444,13 +553,51 @@ export default function App() {
     setDrawerOpen(false);
   };
 
+  const renderMealIngredients = (ingredients) => {
+    if (!ingredients?.length) {
+      return <p>No ingredients listed.</p>;
+    }
+
+    if (!isDataReady) {
+      return <p>{ingredients.join(", ")}</p>;
+    }
+
+    return (
+      <ul className="ingredient-list">
+        {ingredients.map((ingredient, index) => {
+          const ingredientId = resolveIngredientId(ingredient);
+          const category = ingredientId ? getIngredient(ingredientId)?.category : null;
+          return (
+            <li key={`${ingredient}-${index}`}>
+              <span className="ingredient-name">{ingredient}</span>
+              {category ? (
+                <span className={`badge badge-${category}`}>
+                  {formatCategory(category)}
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
+
 
   const handleAddDinnerToGroceries = () => {
     const ingredients = activeDayData?.meals?.dinner?.ingredients || [];
     const additions = ingredients
       .map((item) => item?.trim())
       .filter(Boolean)
-      .map((name) => ({ name, qty: "", unit: "", category: "Extra" }));
+      .map((name) => ({
+        name,
+        qty: "",
+        unit: "",
+        category: (() => {
+          const ingredientId = resolveIngredientId(name);
+          const category = ingredientId ? getIngredient(ingredientId)?.category : null;
+          return formatCategory(category);
+        })(),
+      }));
 
     if (!additions.length) {
       setStatus("No dinner ingredients available to add.");
@@ -483,6 +630,7 @@ export default function App() {
     const nextPlan = swapMealInPlan({
       plan: weeklyPlan,
       recipes,
+      getByMealType: data?.getByMealType,
       profile: buildProfile(),
       phase: cycleInfo.phase,
       symptoms: symptomList,
@@ -491,7 +639,7 @@ export default function App() {
       mealType,
     });
     setWeeklyPlan(nextPlan);
-    setGroceryList(buildGroceryList(nextPlan, ingredientCategories));
+    setGroceryList(buildGroceryList(nextPlan));
     setStatus(`Swapped ${mealType} for day ${dayIndex + 1}.`);
   };
 
@@ -757,7 +905,7 @@ export default function App() {
                     />
                   </label>
                 ) : null}
-                <button type="submit" className="primary-button" disabled={isLoading}>
+                <button type="submit" className="primary-button" disabled={isLoading || !isDataReady}>
                   {isLoading ? "Generating..." : "Generate Plan"}
                 </button>
               </form>
@@ -796,6 +944,145 @@ export default function App() {
                 ) : null}
               </div>
             </details>
+            <details className="accordion" open={false}>
+              <summary>RECIPE FINDER</summary>
+              <div className="accordion-body">
+                {dataState.status === "loading" ? (
+                  <div className="recipe-finder-skeleton" aria-label="Loading recipe datasets">
+                    <div className="skeleton-line" />
+                    <div className="skeleton-line" />
+                    <div className="skeleton-line" />
+                  </div>
+                ) : dataState.status === "error" ? (
+                  <p>Unable to load recipe datasets. Check your connection and reload.</p>
+                ) : (
+                  <div className="recipe-finder">
+                    <div className="filter-grid">
+                      <label>
+                        Meal type
+                        <select
+                          value={filterMealType}
+                          onChange={(event) => setFilterMealType(event.target.value)}
+                        >
+                          <option value="">Any</option>
+                          {mealTypeOptions.map((mealType) => (
+                            <option key={mealType} value={mealType}>
+                              {mealType}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="filter-group">
+                        <span>Diet flags</span>
+                        <div className="chip-row">
+                          {dietFlagOptions.length ? (
+                            dietFlagOptions.map((flag) => (
+                              <button
+                                key={flag}
+                                type="button"
+                                className={filterDietFlags.includes(flag) ? "chip active" : "chip"}
+                                onClick={() => toggleDietFlag(flag)}
+                              >
+                                <span>{flag}</span>
+                                {filterDietFlags.includes(flag) ? <span className="chip-dot" /> : null}
+                              </button>
+                            ))
+                          ) : (
+                            <span className="helper">No diet flags available.</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <label className="stretch">
+                      Ingredient filters
+                      <div className="search-row compact">
+                        <input
+                          type="search"
+                          value={filterIngredientQuery}
+                          onChange={(event) => {
+                            setFilterIngredientQuery(event.target.value);
+                            setFilterError("");
+                          }}
+                          placeholder="Search ingredients"
+                        />
+                        <button type="button" className="ghost" onClick={handleAddIngredientFilter}>
+                          Add
+                        </button>
+                      </div>
+                      {filterError ? <div className="helper error">{filterError}</div> : null}
+                      {filterIngredientSuggestions.length ? (
+                        <div className="suggestions">
+                          {filterIngredientSuggestions.map((ingredient) => (
+                            <button
+                              key={ingredient.id}
+                              type="button"
+                              className="suggestion"
+                              onClick={() => addIngredientFilter(ingredient)}
+                            >
+                              <span>{ingredient.name}</span>
+                              {ingredient.category ? (
+                                <span className={`badge badge-${ingredient.category}`}>
+                                  {formatCategory(ingredient.category)}
+                                </span>
+                              ) : null}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </label>
+                    <div className="chip-row">
+                      {selectedIngredients.length ? (
+                        selectedIngredients.map((ingredient) => (
+                          <button
+                            type="button"
+                            key={ingredient.id}
+                            className="chip active ingredient-chip"
+                            onClick={() => removeIngredientFilter(ingredient.id)}
+                          >
+                            <span>{ingredient.name}</span>
+                            {ingredient.category ? (
+                              <span className={`badge badge-${ingredient.category}`}>
+                                {formatCategory(ingredient.category)}
+                              </span>
+                            ) : null}
+                            <span className="chip-action">×</span>
+                          </button>
+                        ))
+                      ) : (
+                        <span className="helper">No ingredient filters selected.</span>
+                      )}
+                    </div>
+                    <div className="match-summary">
+                      Matching recipes: <strong>{filteredRecipes.total}</strong>
+                    </div>
+                    {filteredRecipes.items.length ? (
+                      <ul className="recipe-results">
+                        {filteredRecipes.items.map((recipe) => (
+                          <li key={recipe.id} className="recipe-result">
+                            <div>
+                              <strong>{recipe.title}</strong>
+                              <div className="tag-row">
+                                {recipe.mealTypes.map((mealType) => (
+                                  <span className="tag" key={`${recipe.id}-${mealType}`}>
+                                    {mealType}
+                                  </span>
+                                ))}
+                              </div>
+                              {recipe.ingredientPreview ? (
+                                <div className="helper">{recipe.ingredientPreview}</div>
+                              ) : null}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="helper">No recipes match the current filters.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </details>
+            <DatasetDiagnostics data={data} />
             <div className="disclaimer-note">
               Not medical advice. Low-FODMAP guidance is portion-sensitive and this planner uses a
               conservative heuristic.
@@ -858,7 +1145,7 @@ export default function App() {
                                 <span className="tag">{mealType}</span>
                                 <span className="tag">{formatPhase(cycleInfo.phase)} phase</span>
                               </div>
-                              <p>{meal.ingredients.join(", ")}</p>
+                              {renderMealIngredients(meal.ingredients)}
                             </div>
                             <div className="card-actions">
                               <button

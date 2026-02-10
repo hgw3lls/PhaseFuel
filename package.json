@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "server": "node server/index.js",
-    "build": "vite build",
+    "build": "vite build && node scripts/validate-build-data.mjs",
     "preview": "vite preview",
     "dataset:build": "node --loader ./scripts/pipeline/ts-loader.mjs scripts/pipeline/01_ingest_json_recipes.ts && node --loader ./scripts/pipeline/ts-loader.mjs scripts/pipeline/02_build_ingredient_catalog.ts && node --loader ./scripts/pipeline/ts-loader.mjs scripts/pipeline/03_derive_recipe_index.ts"
   },

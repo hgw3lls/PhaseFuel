@@ -1,8 +1,11 @@
 import type { Recipe, UserProfile } from "./types";
 import { PHASE_GUIDANCE } from "./guidance";
+import type { IngredientRecord } from "../diet";
 import { resolveIngredientTokens } from "../diet";
 
 const normalizeName = (value: string) => value.toLowerCase().trim();
+
+const getRecipeIngredients = (recipe: Recipe) => recipe.ingredientTokens || recipe.ingredients || [];
 
 const scoreIngredientRepetition = (
   ingredients: string[],
@@ -40,18 +43,19 @@ export const scoreRecipe = ({
   profile: UserProfile;
   maxRepeats: number;
   forbiddenTokens: Set<string>;
-  ingredientCatalog: { token: string; aliases: string[] }[];
+  ingredientCatalog: IngredientRecord[];
 }) => {
   const rationale: string[] = [];
   let score = 0;
 
-  const recipeTokens = resolveIngredientTokens(recipe.ingredients, ingredientCatalog);
+  const recipeIngredients = getRecipeIngredients(recipe);
+  const recipeTokens = resolveIngredientTokens(recipeIngredients, ingredientCatalog);
   if (recipeTokens.some((token) => forbiddenTokens.has(token))) {
     return { score: -999, rationale: ["Excluded for diet constraints."] };
   }
   if (
     profile.avoidIngredients.some((ingredient) =>
-      recipe.ingredients.join(" ").toLowerCase().includes(ingredient.toLowerCase())
+      recipeIngredients.join(" ").toLowerCase().includes(ingredient.toLowerCase())
     )
   ) {
     return { score: -999, rationale: ["Excluded for avoid list."] };
@@ -100,7 +104,7 @@ export const scoreRecipe = ({
     score -= usedCount * 3;
   }
 
-  score -= scoreIngredientRepetition(recipe.ingredients, ingredientCounts);
+  score -= scoreIngredientRepetition(recipeIngredients, ingredientCounts);
 
   if (!rationale.length) {
     rationale.push("Balanced fit for the week.");

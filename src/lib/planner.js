@@ -3,6 +3,8 @@ import { compileAllowed, resolveIngredientTokens } from "./diet.ts";
 
 const normalizeName = (value) => value.toLowerCase().trim();
 
+const getRecipeIngredients = (recipe) => recipe?.ingredientTokens || recipe?.ingredients || [];
+
 const scoreIngredientRepetition = (ingredients, ingredientCounts) =>
   ingredients.reduce((penalty, ingredient) => {
     const count = ingredientCounts.get(normalizeName(ingredient)) || 0;
@@ -29,7 +31,7 @@ export const scoreRecipe = ({
   ingredientCatalog,
 }) => {
   if (!recipe) return -999;
-  const tokens = resolveIngredientTokens(recipe.ingredients, ingredientCatalog);
+  const tokens = resolveIngredientTokens(getRecipeIngredients(recipe), ingredientCatalog);
   if (tokens.some((token) => forbiddenTokens.has(token))) {
     return -999;
   }
@@ -56,7 +58,7 @@ export const scoreRecipe = ({
     score -= usedCount * 3;
   }
 
-  score -= scoreIngredientRepetition(recipe.ingredients, ingredientCounts);
+  score -= scoreIngredientRepetition(getRecipeIngredients(recipe), ingredientCounts);
 
   if (profile?.timeBudgetMin && recipe.timeMinutes > profile.timeBudgetMin) {
     score -= 2;
@@ -87,7 +89,7 @@ const buildRationale = ({ recipe, phase, symptomTags, usedCount, ingredientCount
   if (usedCount > 0) {
     reasons.push("Variety note: repeated recipe slot this week.");
   }
-  const repeatedIngredients = recipe.ingredients.filter(
+  const repeatedIngredients = getRecipeIngredients(recipe).filter(
     (ingredient) => (ingredientCounts.get(normalizeName(ingredient)) || 0) > 0
   );
   if (repeatedIngredients.length) {
@@ -104,6 +106,7 @@ const buildRationale = ({ recipe, phase, symptomTags, usedCount, ingredientCount
 
 const selectBestRecipe = ({
   recipes,
+  getByMealType,
   phase,
   symptomTags,
   forbiddenTokens,
@@ -115,7 +118,9 @@ const selectBestRecipe = ({
   ingredientCatalog,
   excludeIds = [],
 }) => {
-  const candidates = recipes.filter((recipe) => recipe.mealType === mealType);
+  const candidates = getByMealType
+    ? getByMealType(mealType)
+    : recipes.filter((recipe) => recipe.mealType === mealType);
   let best = null;
   let bestScore = -Infinity;
 
@@ -144,6 +149,7 @@ const selectBestRecipe = ({
 
 export const generateWeeklyPlan = ({
   recipes,
+  getByMealType,
   profile,
   phase,
   symptoms = [],
@@ -174,6 +180,7 @@ export const generateWeeklyPlan = ({
 
     const breakfast = selectBestRecipe({
       recipes,
+      getByMealType,
       phase,
       symptomTags,
       forbiddenTokens,
@@ -190,7 +197,7 @@ export const generateWeeklyPlan = ({
         recipeId: breakfast.id,
         name: breakfast.name,
         mealType: breakfast.mealType,
-        ingredients: breakfast.ingredients,
+        ingredients: getRecipeIngredients(breakfast),
         tags: breakfast.tags,
         rationale: buildRationale({
           recipe: breakfast,
@@ -205,6 +212,7 @@ export const generateWeeklyPlan = ({
 
     const dinner = selectBestRecipe({
       recipes,
+      getByMealType,
       phase,
       symptomTags,
       forbiddenTokens,
@@ -221,7 +229,7 @@ export const generateWeeklyPlan = ({
         recipeId: dinner.id,
         name: dinner.name,
         mealType: dinner.mealType,
-        ingredients: dinner.ingredients,
+        ingredients: getRecipeIngredients(dinner),
         tags: dinner.tags,
         rationale: buildRationale({
           recipe: dinner,
@@ -239,13 +247,14 @@ export const generateWeeklyPlan = ({
         recipeId: dinner.id,
         name: `${dinner.name} leftovers`,
         mealType: "lunch",
-        ingredients: dinner.ingredients,
+        ingredients: getRecipeIngredients(dinner),
         tags: [...dinner.tags, "leftovers"],
         rationale: ["Uses batch-cooked leftovers to reduce prep."],
       };
     } else {
       const lunch = selectBestRecipe({
         recipes,
+        getByMealType,
         phase,
         symptomTags,
         forbiddenTokens,
@@ -262,7 +271,7 @@ export const generateWeeklyPlan = ({
           recipeId: lunch.id,
           name: lunch.name,
           mealType: lunch.mealType,
-          ingredients: lunch.ingredients,
+          ingredients: getRecipeIngredients(lunch),
           tags: lunch.tags,
           rationale: buildRationale({
             recipe: lunch,
@@ -279,6 +288,7 @@ export const generateWeeklyPlan = ({
     if (settings.includeSnacks) {
       const snack = selectBestRecipe({
         recipes,
+        getByMealType,
         phase,
         symptomTags,
         forbiddenTokens,
@@ -295,7 +305,7 @@ export const generateWeeklyPlan = ({
           recipeId: snack.id,
           name: snack.name,
           mealType: snack.mealType,
-          ingredients: snack.ingredients,
+          ingredients: getRecipeIngredients(snack),
           tags: snack.tags,
           rationale: buildRationale({
             recipe: snack,
@@ -330,6 +340,7 @@ export const generateWeeklyPlan = ({
 export const swapMealInPlan = ({
   plan,
   recipes,
+  getByMealType,
   profile,
   phase,
   symptoms,
@@ -366,6 +377,7 @@ export const swapMealInPlan = ({
 
   const replacement = selectBestRecipe({
     recipes,
+    getByMealType,
     phase,
     symptomTags,
     forbiddenTokens,
@@ -386,7 +398,7 @@ export const swapMealInPlan = ({
     recipeId: replacement.id,
     name: replacement.name,
     mealType: replacement.mealType,
-    ingredients: replacement.ingredients,
+    ingredients: getRecipeIngredients(replacement),
     tags: replacement.tags,
     rationale: buildRationale({
       recipe: replacement,
