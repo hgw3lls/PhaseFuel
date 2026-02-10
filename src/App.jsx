@@ -93,6 +93,13 @@ const formatDuration = (totalSeconds) => {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 };
 
+const waitForNextPaint = () =>
+  new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      setTimeout(resolve, 0);
+    });
+  });
+
 
 const groupGroceries = (items) =>
   items.reduce((acc, item) => {
@@ -208,6 +215,9 @@ export default function App() {
     };
   }, [isDataReady, filterMealType, filterDietFlags, filterIngredientIds]);
   const pantryFirst = settings.featureFlags.enableUseWhatYouHaveMode || useWhatYouHaveOverride;
+  const loadingElapsedSeconds = Math.round(loadingElapsedMs / 1000);
+  const estimatedGenerationSeconds = Math.max(1, Math.round(estimatedGenerationMs / 1000));
+  const loadingProgress = Math.min(100, Math.round((loadingElapsedMs / estimatedGenerationMs) * 100));
   const cycleInfo = useMemo(
     () => estimatePhase(new Date().toISOString(), settings.cyclePreferences, settings.cycleMode),
     [settings.cyclePreferences, settings.cycleMode]
@@ -259,6 +269,18 @@ export default function App() {
   useEffect(() => {
     saveFreezer(freezerItems);
   }, [freezerItems]);
+
+  useEffect(() => {
+    if (!isLoading || !loadingStartedAt) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setLoadingElapsedMs(Date.now() - loadingStartedAt);
+    }, 250);
+
+    return () => window.clearInterval(intervalId);
+  }, [isLoading, loadingStartedAt]);
 
   useEffect(() => {
     savePrices(priceItems);
@@ -406,8 +428,9 @@ export default function App() {
     setLoadingStartedAt(generationStartedAt);
     setLoadingElapsedMs(0);
     setGenerationState("generating");
-    setStatus("Generating deterministic plan...");
+    setStatus("Generating personalized plan...");
     setPlannerError("");
+    await waitForNextPaint();
 
     const useWhatYouHaveMode =
       settings.featureFlags.enableUseWhatYouHaveMode || useWhatYouHaveOverride;
@@ -955,7 +978,10 @@ export default function App() {
                 </button>
                 {isLoading ? (
                   <p className="helper" role="status" aria-live="polite">
-                    Please wait while your plan is being generated.
+                    Please wait while your plan is being generated ({formatDuration(
+                      loadingElapsedSeconds
+                    )}
+                    /~{formatDuration(estimatedGenerationSeconds)}).
                   </p>
                 ) : null}
               </form>
@@ -1165,6 +1191,11 @@ export default function App() {
               <div className="loading-state" role="status" aria-live="polite">
                 <div className="loading-spinner" aria-hidden="true" />
                 <p>Generating your plan. This can take a moment.</p>
+                <p className="helper">
+                  Elapsed {formatDuration(loadingElapsedSeconds)} / estimated{" "}
+                  {formatDuration(estimatedGenerationSeconds)}
+                </p>
+                <progress value={loadingProgress} max="100" aria-label="Plan generation progress" />
               </div>
             ) : weeklyPlan ? (
               <>

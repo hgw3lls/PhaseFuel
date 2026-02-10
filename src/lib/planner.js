@@ -20,6 +20,25 @@ const MEAL_NUTRITION_PRIORITIES = {
   snack: ["fiber", "protein"],
 };
 
+const hashString = (value = "") => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+};
+
+const createRng = (seed) => {
+  let state = seed >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let next = Math.imul(state ^ (state >>> 15), 1 | state);
+    next ^= next + Math.imul(next ^ (next >>> 7), 61 | next);
+    return ((next ^ (next >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
 const buildCategoryLookup = (ingredientCatalog = []) => {
   const map = new Map();
   ingredientCatalog.forEach((ingredient) => {
@@ -221,7 +240,7 @@ const buildRationale = ({
   return reasons;
 };
 
-const selectBestRecipe = ({
+const selectRecipeCandidate = ({
   recipes,
   getByMealType,
   phase,
@@ -236,13 +255,13 @@ const selectBestRecipe = ({
   dailyCategoryCounts,
   categoryLookup,
   excludeIds = [],
+  rng = Math.random,
 }) => {
   const candidates = getByMealType
     ? getByMealType(mealType)
     : recipes.filter((recipe) => recipe.mealType === mealType);
-  let best = null;
-  let bestScore = -Infinity;
 
+  const scored = [];
   candidates.forEach((recipe) => {
     if (excludeIds.includes(recipe.id)) return;
     const usedCount = usedRecipeCounts.get(recipe.id) || 0;
@@ -259,13 +278,35 @@ const selectBestRecipe = ({
       dailyCategoryCounts,
       categoryLookup,
     });
-    if (score > bestScore) {
-      bestScore = score;
-      best = recipe;
+    if (Number.isFinite(score)) {
+      scored.push({ recipe, score });
     }
   });
 
-  return best;
+  if (!scored.length) {
+    return null;
+  }
+
+  scored.sort((left, right) => right.score - left.score);
+  const bestScore = scored[0].score;
+  const shortlist = scored.filter((entry, index) => index < 5 && entry.score >= bestScore - 2.5);
+  const pool = shortlist.length ? shortlist : scored.slice(0, 3);
+
+  const weightedPool = pool.map((entry, index) => ({
+    ...entry,
+    weight: Math.max(0.1, 1 + (entry.score - bestScore) * 0.25 + (pool.length - index) * 0.2),
+  }));
+  const totalWeight = weightedPool.reduce((sum, entry) => sum + entry.weight, 0);
+
+  let threshold = rng() * totalWeight;
+  for (const entry of weightedPool) {
+    threshold -= entry.weight;
+    if (threshold <= 0) {
+      return entry.recipe;
+    }
+  }
+
+  return weightedPool[0].recipe;
 };
 
 export const generateWeeklyPlan = ({
@@ -289,6 +330,16 @@ export const generateWeeklyPlan = ({
   const maxRepeats = settings.maxRepeatsPerWeek ?? 2;
   const ingredientCatalog = settings.ingredientCatalog || [];
   const categoryLookup = buildCategoryLookup(ingredientCatalog);
+  const randomnessSeed = settings.planSeed ?? Date.now();
+  const seedMaterial = JSON.stringify({
+    userId: profile?.userId || "",
+    phase,
+    symptoms: symptomTags,
+    days,
+    startDateISO: startDateISO || "",
+    randomnessSeed,
+  });
+  const rng = createRng(hashString(seedMaterial));
 
   const startDate = startDateISO ? new Date(startDateISO) : new Date();
   const planDays = [];
@@ -301,7 +352,7 @@ export const generateWeeklyPlan = ({
     const meals = {};
     const dailyCategoryCounts = new Map();
 
-    const breakfast = selectBestRecipe({
+    const breakfast = selectRecipeCandidate({
       recipes,
       getByMealType,
       phase,
@@ -315,6 +366,7 @@ export const generateWeeklyPlan = ({
       ingredientCatalog,
       dailyCategoryCounts,
       categoryLookup,
+      rng,
     });
     if (breakfast) {
       const usedCount = usedRecipeCounts.get(breakfast.id) || 0;
@@ -338,7 +390,7 @@ export const generateWeeklyPlan = ({
       };
     }
 
-    const dinner = selectBestRecipe({
+    const dinner = selectRecipeCandidate({
       recipes,
       getByMealType,
       phase,
@@ -352,6 +404,7 @@ export const generateWeeklyPlan = ({
       ingredientCatalog,
       dailyCategoryCounts,
       categoryLookup,
+      rng,
     });
     if (dinner) {
       const usedCount = usedRecipeCounts.get(dinner.id) || 0;
@@ -385,7 +438,7 @@ export const generateWeeklyPlan = ({
         rationale: ["Uses batch-cooked leftovers to reduce prep."],
       };
     } else {
-      const lunch = selectBestRecipe({
+      const lunch = selectRecipeCandidate({
         recipes,
         getByMealType,
         phase,
@@ -399,6 +452,7 @@ export const generateWeeklyPlan = ({
         ingredientCatalog,
         dailyCategoryCounts,
         categoryLookup,
+        rng,
       });
       if (lunch) {
         const usedCount = usedRecipeCounts.get(lunch.id) || 0;
@@ -424,7 +478,7 @@ export const generateWeeklyPlan = ({
     }
 
     if (settings.includeSnacks) {
-      const snack = selectBestRecipe({
+      const snack = selectRecipeCandidate({
         recipes,
         getByMealType,
         phase,
@@ -438,6 +492,7 @@ export const generateWeeklyPlan = ({
         ingredientCatalog,
         dailyCategoryCounts,
         categoryLookup,
+        rng,
       });
       if (snack) {
         const usedCount = usedRecipeCounts.get(snack.id) || 0;
@@ -480,7 +535,7 @@ export const generateWeeklyPlan = ({
   return {
     startDateISO: startDate.toISOString().slice(0, 10),
     days: planDays,
-    notes: ["Deterministic plan based on cycle phase, symptoms, and constraints."],
+    notes: ["Adaptive plan based on cycle phase, symptoms, and constraints with built-in variety."],
   };
 };
 
@@ -507,6 +562,7 @@ export const swapMealInPlan = ({
   const ingredientCounts = new Map();
   const maxRepeats = settings.maxRepeatsPerWeek ?? 2;
   const categoryLookup = buildCategoryLookup(ingredientCatalog);
+  const rng = createRng(hashString(JSON.stringify({ dayIndex, mealType, timestamp: Date.now() })));
   const currentMeal = plan.days[dayIndex].meals[mealType];
   const dailyCategoryCounts = new Map();
 
@@ -529,7 +585,7 @@ export const swapMealInPlan = ({
 
   const excludeIds = currentMeal?.recipeId ? [currentMeal.recipeId] : [];
 
-  const replacement = selectBestRecipe({
+  const replacement = selectRecipeCandidate({
     recipes,
     getByMealType,
     phase,
@@ -544,6 +600,7 @@ export const swapMealInPlan = ({
     dailyCategoryCounts,
     categoryLookup,
     excludeIds,
+    rng,
   });
 
   if (!replacement) return plan;

@@ -5,7 +5,7 @@ export const buildFallbackNarrative = ({ weeklyPlan, profileSummary }) => {
   })) || [];
 
   return {
-    summaryText: `Deterministic plan generated for ${profileSummary}. Not medical advice.`,
+    summaryText: `Personalized plan generated for ${profileSummary}. Not medical advice.`,
     dayNotes,
     groceryByAisle: [],
     substitutions: [],
