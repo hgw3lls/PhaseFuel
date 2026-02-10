@@ -150,6 +150,7 @@ export default function App() {
   const [activeView, setActiveView] = useState("today");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activePlanDay, setActivePlanDay] = useState(null);
+  const [activeRecipeMealType, setActiveRecipeMealType] = useState(null);
   const [planDays, setPlanDays] = useState(7);
   const [dietaryPreferences, setDietaryPreferences] = useState("");
   const [cuisinePreferences, setCuisinePreferences] = useState("");
@@ -165,6 +166,7 @@ export default function App() {
 
   const data = dataState.data;
   const recipes = data?.recipes || [];
+  const recipeById = useMemo(() => new Map(recipes.map((recipe) => [recipe.id, recipe])), [recipes]);
   const ingredientCatalog = data?.ingredients || [];
   const dietFlagOptions = data?.dietFlags || [];
   const mealTypeOptions = data?.mealTypes || ["breakfast", "lunch", "dinner", "snack"];
@@ -264,6 +266,10 @@ export default function App() {
       setActivePlanDay((current) => (current ?? 0));
     }
   }, [weeklyPlan]);
+
+  useEffect(() => {
+    setActiveRecipeMealType(null);
+  }, [activePlanDay, weeklyPlan]);
 
 
   const handleSettingsChange = (key, value) => {
@@ -582,6 +588,12 @@ export default function App() {
     );
   };
 
+  const getMealDisplayName = (meal) => {
+    if (!meal) return "Meal";
+    const recipe = meal.recipeId ? recipeById.get(meal.recipeId) : null;
+    return recipe?.name || recipe?.title || meal.name || "Meal";
+  };
+
 
   const handleAddDinnerToGroceries = () => {
     const ingredients = activeDayData?.meals?.dinner?.ingredients || [];
@@ -732,6 +744,18 @@ export default function App() {
   }));
 
   const activeDayData = weeklyPlan?.days?.[activePlanDay] || null;
+  const activeRecipeMeal =
+    activeRecipeMealType && activeDayData?.meals ? activeDayData.meals[activeRecipeMealType] : null;
+  const activeRecipeDetails =
+    activeRecipeMeal?.recipeId && recipes.length
+      ? recipes.find((recipe) => recipe.id === activeRecipeMeal.recipeId) || null
+      : null;
+  const activeRecipeName =
+    activeRecipeDetails?.name || activeRecipeDetails?.title || getMealDisplayName(activeRecipeMeal);
+  const activeRecipeIngredients =
+    activeRecipeDetails?.ingredientTokens || activeRecipeMeal?.ingredients || [];
+  const activeRecipeSteps =
+    activeRecipeDetails?.steps || activeRecipeDetails?.instructions || [];
 
   const groceryGroups = groupGroceries(groceryList);
   const groceryCount = groceryList.length;
@@ -908,6 +932,11 @@ export default function App() {
                 <button type="submit" className="primary-button" disabled={isLoading || !isDataReady}>
                   {isLoading ? "Generating..." : "Generate Plan"}
                 </button>
+                {isLoading ? (
+                  <p className="helper" role="status" aria-live="polite">
+                    Please wait while your plan is being generated.
+                  </p>
+                ) : null}
               </form>
               <div className="secondary-actions">
                 {(settings.featureFlags.enableUseWhatYouHaveMode ||
@@ -1111,7 +1140,12 @@ export default function App() {
                 ))}
               </div>
             </div>
-            {weeklyPlan ? (
+            {isLoading ? (
+              <div className="loading-state" role="status" aria-live="polite">
+                <div className="loading-spinner" aria-hidden="true" />
+                <p>Generating your plan. This can take a moment.</p>
+              </div>
+            ) : weeklyPlan ? (
               <>
                 <div className="calendar-grid">
                   {weeklyPlan.days.map((day, index) => (
@@ -1123,9 +1157,9 @@ export default function App() {
                     >
                       <div className="calendar-header">{weekdayLabels[index]}</div>
                       <div className="calendar-date">{day.dateISO}</div>
-                      <div className="calendar-meal">{day.meals.breakfast?.name}</div>
-                      <div className="calendar-meal">{day.meals.lunch?.name}</div>
-                      <div className="calendar-meal">{day.meals.dinner?.name}</div>
+                      <div className="calendar-meal">{getMealDisplayName(day.meals.breakfast)}</div>
+                      <div className="calendar-meal">{getMealDisplayName(day.meals.lunch)}</div>
+                      <div className="calendar-meal">{getMealDisplayName(day.meals.dinner)}</div>
                     </button>
                   ))}
                 </div>
@@ -1137,17 +1171,28 @@ export default function App() {
                       .filter((mealType) => activeDayData.meals[mealType])
                       .map((mealType) => {
                         const meal = activeDayData.meals[mealType];
+                        const isRecipeOpen = activeRecipeMealType === mealType;
                         return (
                           <div className="meal-card" key={mealType}>
                             <div>
-                              <h4>{meal.name}</h4>
+                              <h4>{getMealDisplayName(meal)}</h4>
                               <div className="tag-row">
                                 <span className="tag">{mealType}</span>
                                 <span className="tag">{formatPhase(cycleInfo.phase)} phase</span>
                               </div>
-                              {renderMealIngredients(meal.ingredients)}
                             </div>
                             <div className="card-actions">
+                              <button
+                                type="button"
+                                className="ghost"
+                                onClick={() =>
+                                  setActiveRecipeMealType((current) =>
+                                    current === mealType ? null : mealType
+                                  )
+                                }
+                              >
+                                {isRecipeOpen ? "Hide recipe" : "View recipe"}
+                              </button>
                               <button
                                 type="button"
                                 className="ghost"
@@ -1171,6 +1216,36 @@ export default function App() {
                   ) : (
                     <p>Select a day to view details.</p>
                   )}
+
+                  {activeRecipeMeal ? (
+                    <div className="meal-card recipe-details-card">
+                      <div>
+                        <h4>{activeRecipeName}</h4>
+                        <div className="tag-row">
+                          <span className="tag">{activeRecipeMealType}</span>
+                          {activeRecipeDetails?.timeMinutes ? (
+                            <span className="tag">{activeRecipeDetails.timeMinutes} min</span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div>
+                        <h5>Ingredients</h5>
+                        {renderMealIngredients(activeRecipeIngredients)}
+                      </div>
+                      <div>
+                        <h5>Instructions</h5>
+                        {activeRecipeSteps.length ? (
+                          <ol className="instruction-list">
+                            {activeRecipeSteps.map((step, index) => (
+                              <li key={`${activeRecipeMeal.recipeId}-step-${index}`}>{step}</li>
+                            ))}
+                          </ol>
+                        ) : (
+                          <p className="helper">No detailed instructions available for this recipe.</p>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="why-panel">
