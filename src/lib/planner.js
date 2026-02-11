@@ -56,6 +56,31 @@ const buildCategoryLookup = (ingredientCatalog = []) => {
   return map;
 };
 
+
+const toReadableList = (items = []) => {
+  if (!items.length) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+};
+
+const buildPlanReasoningNote = ({ phase, symptomTags, settings = {}, profile }) => {
+  const symptomSummary = symptomTags.length
+    ? `prioritizing symptom support for ${toReadableList(symptomTags.slice(0, 4))}`
+    : "using cycle-phase guidance with no symptom tags provided";
+  const inputSignals = [
+    settings.preferLeftoverLunch ? "leftover-forward lunches" : null,
+    settings.includeSnacks ? "daily snacks" : "snacks minimized",
+    profile?.timeBudgetMin ? `a ${profile.timeBudgetMin} minute meal-time budget` : null,
+    profile?.budgetLevel ? `${profile.budgetLevel} budget mode` : null,
+    Number.isFinite(settings.maxRepeatsPerWeek)
+      ? `max ${settings.maxRepeatsPerWeek} repeat(s) per recipe`
+      : null,
+  ].filter(Boolean);
+
+  return `Menstrual-cycle-first planning for the ${phase} phase, ${symptomSummary}, and incorporating ${toReadableList(inputSignals)}.`;
+};
+
 const summarizeNutritionByCategory = (ingredients, ingredientCatalog, categoryLookup) => {
   const summary = { protein: 0, fiber: 0, micronutrient: 0, carb: 0, fat: 0 };
   const tokens = resolveIngredientTokens(ingredients, ingredientCatalog);
@@ -195,13 +220,21 @@ const buildRationale = ({
 }) => {
   const guidance = PHASE_GUIDANCE[phase] || { targetTags: [] };
   const reasons = [];
+  reasons.push(`Cycle-first choice: anchored to the ${phase} phase.`);
+  if (symptomTags.length) {
+    reasons.push(`Symptom priorities considered: ${toReadableList(symptomTags.slice(0, 4))}.`);
+  }
   const hits = recipe.tags.filter((tag) => guidance.targetTags.includes(tag));
   if (hits.length) {
     reasons.push(`Supports ${phase} phase with ${hits.slice(0, 2).join(" & ")} tags.`);
+  } else {
+    reasons.push(`Phase-safe fit for ${phase} goals.`);
   }
   const symptomHits = recipe.tags.filter((tag) => symptomTags.includes(tag));
   if (symptomHits.length) {
     reasons.push(`Targets symptoms using ${symptomHits.slice(0, 2).join(" & ")}.`);
+  } else if (symptomTags.length) {
+    reasons.push("No direct symptom-tag match; selected for overall balance and constraints.");
   }
   if (profile?.timeBudgetMin && recipe.timeMinutes <= profile.timeBudgetMin) {
     reasons.push(`Fits time budget at ${recipe.timeMinutes} minutes.`);
@@ -343,6 +376,12 @@ export const generateWeeklyPlan = ({
 
   const startDate = startDateISO ? new Date(startDateISO) : new Date();
   const planDays = [];
+  const planReasoningNote = buildPlanReasoningNote({
+    phase,
+    symptomTags,
+    settings,
+    profile,
+  });
 
   for (let index = 0; index < days; index += 1) {
     const dayDate = new Date(startDate);
@@ -529,13 +568,13 @@ export const generateWeeklyPlan = ({
       });
     });
 
-    planDays.push({ dateISO, meals });
+    planDays.push({ dateISO, meals, notes: planReasoningNote });
   }
 
   return {
     startDateISO: startDate.toISOString().slice(0, 10),
     days: planDays,
-    notes: ["Adaptive plan based on cycle phase, symptoms, and constraints with built-in variety."],
+    notes: [planReasoningNote],
   };
 };
 
