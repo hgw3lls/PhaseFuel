@@ -1094,3 +1094,314 @@ textarea {
   margin: 0;
   color: #7c4b00;
 }
+
+/* --- 2026 Brutalist mobile-first overhaul --- */
+:root {
+  --bg: #ffd9b8;
+  --fg: #111111;
+  --border: #111111;
+  --muted: #3f3f46;
+  --accent: #6d28d9;
+  --surface: #fffef8;
+  --surface-alt: #ffe8d1;
+  --lime: #d9f99d;
+  --pink: #fbcfe8;
+  --safe-bottom: max(0.9rem, env(safe-area-inset-bottom));
+}
+
+body {
+  font-family: "Space Grotesk", "Inter", sans-serif;
+  background:
+    linear-gradient(180deg, #ffcfa2 0%, #ffd9b8 42%, #ffe5ce 100%);
+}
+
+.app-shell {
+  width: min(100%, 430px);
+  margin: 0 auto;
+  border-left: var(--borderWidth) solid var(--border);
+  border-right: var(--borderWidth) solid var(--border);
+  background: rgba(255, 254, 248, 0.9);
+  box-shadow: 0 0 0 var(--borderWidth) var(--border), 0 14px 0 #000;
+}
+
+.top-bar {
+  backdrop-filter: blur(6px);
+  background: rgba(255, 254, 248, 0.95);
+}
+
+.brand-dot {
+  border-radius: 0;
+  border: 2px solid var(--border);
+  box-shadow: 3px 3px 0 #000;
+}
+
+.screen-title {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.icon-button {
+  box-shadow: 4px 4px 0 #000;
+}
+
+.drawer {
+  background: var(--surface-alt);
+}
+
+.app-main {
+  padding: 1rem 1rem calc(6.4rem + var(--safe-bottom));
+  gap: 1rem;
+}
+
+.hero-block,
+.card,
+.meal-card,
+.transform-card,
+.flow-card,
+.grocery-footer,
+.why-panel,
+.warning-banner,
+.warning-banner * {
+  box-shadow: 5px 5px 0 #000;
+}
+
+.hero-block {
+  background: var(--surface-alt);
+  border-width: 4px;
+  gap: 0.85rem;
+}
+
+.hero-block h1 {
+  font-size: clamp(1.9rem, 6vw, 2.5rem);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.hero-subline {
+  background: var(--lime);
+  border: var(--borderWidth) solid var(--border);
+  padding: 0.5rem;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.info-pill {
+  background: #fff;
+}
+
+.onboarding-panel {
+  border: var(--borderWidth) solid var(--border);
+  background: #fff;
+  padding: 0.85rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.onboarding-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.onboarding-header h2 {
+  margin: 0;
+  text-transform: uppercase;
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+}
+
+.onboarding-header span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 0.3rem 0.45rem;
+  border: 2px solid var(--border);
+  background: var(--pink);
+}
+
+.onboarding-track {
+  width: 100%;
+  height: 12px;
+  border: 2px solid var(--border);
+  background: #fff;
+}
+
+.onboarding-track span {
+  display: block;
+  height: 100%;
+  background: repeating-linear-gradient(
+    45deg,
+    #111,
+    #111 8px,
+    #6d28d9 8px,
+    #6d28d9 16px
+  );
+}
+
+.onboarding-list {
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.onboarding-list li {
+  border: 2px solid var(--border);
+  padding: 0.55rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  background: #fff;
+}
+
+.onboarding-list li.is-complete {
+  background: #ecfccb;
+}
+
+.onboarding-list strong {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.78rem;
+}
+
+.onboarding-list p {
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.moon-oracle {
+  background: linear-gradient(135deg, #f5d0fe 0%, #e0e7ff 100%);
+}
+
+.rhythm-badge {
+  background: #fff;
+}
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+button,
+.drawer-link,
+.nav-item,
+.tag,
+.status-pill {
+  box-shadow: 4px 4px 0 #000;
+}
+
+button:active,
+.nav-item:active,
+.drawer-link:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 #000;
+}
+
+.bottom-nav {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 0;
+  width: min(100%, 430px);
+  padding: 0.7rem 0.5rem calc(0.7rem + var(--safe-bottom));
+  border-top: 4px solid var(--border);
+  background: #fffef8;
+  z-index: 40;
+}
+
+.bottom-nav {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.nav-item {
+  padding: 0.5rem 0.3rem;
+  min-height: 62px;
+  border: 3px solid var(--border);
+  background: #fff;
+}
+
+.nav-item.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.nav-icon {
+  display: none;
+}
+
+.nav-icon-glyph {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.nav-label {
+  margin-top: 0.25rem;
+  font-size: 0.58rem;
+  letter-spacing: 0.03em;
+}
+
+.card,
+.meal-card,
+.transform-card,
+.flow-card,
+.grocery-footer {
+  background: #fff;
+  border-width: 4px;
+}
+
+.form-grid label,
+.filter-group,
+.toggle-item,
+.checkbox-row {
+  background: #fff;
+  border: 2px solid var(--border);
+  padding: 0.55rem;
+}
+
+label > input,
+label > textarea,
+label > select {
+  margin-top: 0.4rem;
+}
+
+input,
+textarea,
+select {
+  border-width: 2px;
+}
+
+h2,
+h3 {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+@media (min-width: 768px) {
+  .app-shell {
+    width: min(100%, 1024px);
+    max-width: 1024px;
+  }
+
+  .app-main {
+    padding: 1.2rem 1.2rem calc(6.8rem + var(--safe-bottom));
+  }
+
+  .quick-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .onboarding-list li {
+    align-items: center;
+  }
+
+  .bottom-nav {
+    width: min(100%, 1024px);
+  }
+
+  .nav-label {
+    font-size: 0.67rem;
+  }
+}
