@@ -2,6 +2,8 @@ import { buildDaySignals } from "./planner.js";
 import { calcMacroRanges } from "./macros.js";
 import { MEAL_TEMPLATES, getTemplatesByPhase } from "./templates.js";
 import { getMoonPhaseFraction, getMoonPhaseName } from "./moon.js";
+import { planWeekSolved as solveWeekPlan } from "./solver.js";
+import { getCandidatesByMealSlot, getTemplateCandidatesByMealSlot } from "./candidates.js";
 
 const toDateOnly = (value) => {
   const date = value instanceof Date ? value : new Date(value);
@@ -274,4 +276,28 @@ export const planWeek = (profile, startDate = new Date()) => {
     startDate: dateISO(start),
     days: week,
   };
+};
+
+
+export const planWeekSolved = (profile, startDate = new Date(), options = {}) => {
+  if (options.candidatesByMealSlot) {
+    return solveWeekPlan(profile, startDate, options);
+  }
+
+  const candidatesByMealSlot = options.candidatesByMealSlot || getTemplateCandidatesByMealSlot();
+  return solveWeekPlan(profile, startDate, { ...options, candidatesByMealSlot });
+};
+
+export const planWeekSolvedWithCandidates = async (profile, startDate = new Date(), options = {}) => {
+  const candidatesByMealSlot = options.candidatesByMealSlot ||
+    await getCandidatesByMealSlot(profile, startDate, {
+      enableRecipeProvider: options.enableRecipeProvider ?? profile?.enableRecipeProvider !== false,
+      provider: options.provider,
+      nutritionSources: options.nutritionSources || profile?.nutritionSources || { fdc: true, off: true },
+      lowDataMode: options.lowDataMode ?? profile?.lowDataMode ?? false,
+      fdcProvider: options.fdcProvider,
+      offProvider: options.offProvider,
+    });
+
+  return solveWeekPlan(profile, startDate, { ...options, candidatesByMealSlot });
 };
