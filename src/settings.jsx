@@ -42,6 +42,10 @@ const SETTINGS_VERSION = 4;
  * @property {number} maxRepeatsPerWeek
  * @property {boolean} enableMoonCadence
  * @property {boolean} sleepSensitive
+ * @property {boolean} enableRecipeProvider
+ * @property {boolean} nutritionSourceFdc
+ * @property {boolean} nutritionSourceOff
+ * @property {boolean} lowDataMode
  */
 
 const DEFAULT_CYCLE_PREFERENCES = {
@@ -79,6 +83,10 @@ const DEFAULT_SETTINGS = {
   maxRepeatsPerWeek: 2,
   enableMoonCadence: true,
   sleepSensitive: false,
+  enableRecipeProvider: true,
+  nutritionSourceFdc: true,
+  nutritionSourceOff: true,
+  lowDataMode: false,
 };
 
 const coerceBoolean = (value, fallback) => (typeof value === "boolean" ? value : fallback);
@@ -177,6 +185,19 @@ const normalizeSettings = (candidate) => {
     ),
     enableMoonCadence: coerceBoolean(candidate.enableMoonCadence, DEFAULT_SETTINGS.enableMoonCadence),
     sleepSensitive: coerceBoolean(candidate.sleepSensitive, DEFAULT_SETTINGS.sleepSensitive),
+    enableRecipeProvider: coerceBoolean(
+      candidate.enableRecipeProvider,
+      DEFAULT_SETTINGS.enableRecipeProvider
+    ),
+    nutritionSourceFdc: coerceBoolean(
+      candidate.nutritionSourceFdc,
+      DEFAULT_SETTINGS.nutritionSourceFdc
+    ),
+    nutritionSourceOff: coerceBoolean(
+      candidate.nutritionSourceOff,
+      DEFAULT_SETTINGS.nutritionSourceOff
+    ),
+    lowDataMode: coerceBoolean(candidate.lowDataMode, DEFAULT_SETTINGS.lowDataMode),
   };
 };
 

@@ -41,6 +41,8 @@ import {
   upsertPriceItem,
 } from "./modules/priceMemory.js";
 import { loadHistory, MAX_HISTORY, saveHistory } from "./modules/leftoverHistory.js";
+import { createOffProvider } from "./providers/nutrition/off.js";
+import { createFdcProvider } from "./providers/nutrition/fdc.js";
 
 const GROCERY_CHECK_KEY = "phasefuel_grocery_checks";
 
@@ -188,6 +190,8 @@ const buildGroceryList = (plan) => {
 
 export default function App() {
   const { apiKey, setApiKey, clearApiKey, rememberInSession, setRememberInSession } = useApiKey();
+  const offProvider = useMemo(() => createOffProvider(), []);
+  const fdcProvider = useMemo(() => createFdcProvider(), []);
   const [userId, setUserId] = useState("");
   const [cycleDay, setCycleDay] = useState("");
   const [symptoms, setSymptoms] = useState("");
@@ -198,7 +202,10 @@ export default function App() {
   const [freezerItems, setFreezerItems] = useState(() => loadFreezer());
   const [priceItems, setPriceItems] = useState(() => loadPrices());
   const [historyItems, setHistoryItems] = useState(() => loadHistory());
-  const [pantryInput, setPantryInput] = useState({ name: "", qty: "", unit: "", expiresOn: "" });
+  const [pantryInput, setPantryInput] = useState({ name: "", qty: "", unit: "", expiresOn: "", barcode: "" });
+  const [pantryBarcode, setPantryBarcode] = useState("");
+  const [pantryIngredientQuery, setPantryIngredientQuery] = useState("");
+  const [pantryIngredientHits, setPantryIngredientHits] = useState([]);
   const [freezerInput, setFreezerInput] = useState({ name: "", portions: "" });
   const [priceInput, setPriceInput] = useState({ name: "", unit: "", price: "" });
   const [budgetNotes, setBudgetNotes] = useState("");
@@ -394,7 +401,7 @@ export default function App() {
   const addPantryItem = (event) => {
     event.preventDefault();
     setPantryItems((items) => upsertPantryItem(items, pantryInput));
-    setPantryInput({ name: "", qty: "", unit: "", expiresOn: "" });
+    setPantryInput({ name: "", qty: "", unit: "", expiresOn: "", barcode: "" });
   };
 
   const addFreezerEntry = (event) => {
@@ -404,6 +411,47 @@ export default function App() {
     }
     setFreezerItems((items) => addFreezerItem(items, freezerInput));
     setFreezerInput({ name: "", portions: "" });
+  };
+
+  const handleLookupPantryBarcode = async () => {
+    if (!pantryBarcode.trim()) return;
+    try {
+      const hit = await offProvider.lookupBarcode(pantryBarcode.trim());
+      if (!hit) {
+        setStatus("Barcode not found in Open Food Facts.");
+        return;
+      }
+      setPantryItems((items) =>
+        upsertPantryItem(items, {
+          name: hit.name,
+          qty: "1",
+          unit: hit.servingSize || "pack",
+          barcode: hit.barcode || pantryBarcode.trim(),
+        })
+      );
+      setPantryBarcode("");
+      setStatus(`Added ${hit.name} from barcode.`);
+    } catch (error) {
+      setStatus("Barcode lookup failed. Try again later.");
+    }
+  };
+
+  const handleSearchPantryIngredient = async () => {
+    if (!pantryIngredientQuery.trim()) return;
+    try {
+      const hits = await fdcProvider.searchFoods(pantryIngredientQuery.trim());
+      setPantryIngredientHits(hits.slice(0, 6));
+      if (!hits.length) setStatus("No USDA matches found.");
+    } catch (error) {
+      setStatus("USDA lookup failed. Try again later.");
+    }
+  };
+
+  const handleAddPantryIngredientHit = (hit) => {
+    setPantryItems((items) =>
+      upsertPantryItem(items, { name: hit.name, qty: "100", unit: "g", nutritionSource: "fdc", nutritionFoodId: hit.id })
+    );
+    setStatus(`Added ${hit.name} to pantry.`);
   };
 
   const addPriceEntry = (event) => {
@@ -431,6 +479,12 @@ export default function App() {
       preferTags,
       timeBudgetMin: settings.timeBudgetMin,
       budgetLevel: settings.costMode,
+      enableRecipeProvider: settings.enableRecipeProvider,
+      nutritionSources: {
+        fdc: settings.nutritionSourceFdc,
+        off: settings.nutritionSourceOff,
+      },
+      lowDataMode: settings.lowDataMode,
     };
   };
 
@@ -979,6 +1033,35 @@ export default function App() {
       onChange: () => updateSettings({ includeSnacks: !settings.includeSnacks }),
     },
     {
+      key: "enableRecipeProvider",
+      label: "Enable recipe provider (TheMealDB dev)",
+      description:
+        "Fetch external recipes for solver candidates. Falls back to templates when provider is unavailable.",
+      value: settings.enableRecipeProvider,
+      onChange: () => updateSettings({ enableRecipeProvider: !settings.enableRecipeProvider }),
+    },
+    {
+      key: "nutritionSourceFdc",
+      label: "Nutrition source: USDA FDC",
+      description: "Use USDA FoodData Central via server proxy for generic ingredient macros.",
+      value: settings.nutritionSourceFdc,
+      onChange: () => updateSettings({ nutritionSourceFdc: !settings.nutritionSourceFdc }),
+    },
+    {
+      key: "nutritionSourceOff",
+      label: "Nutrition source: Open Food Facts",
+      description: "Use Open Food Facts for packaged foods/barcode nutrition.",
+      value: settings.nutritionSourceOff,
+      onChange: () => updateSettings({ nutritionSourceOff: !settings.nutritionSourceOff }),
+    },
+    {
+      key: "lowDataMode",
+      label: "Low-data mode",
+      description: "Reduce nutrition API calls; prefer cached/local estimates.",
+      value: settings.lowDataMode,
+      onChange: () => updateSettings({ lowDataMode: !settings.lowDataMode }),
+    },
+    {
       key: "enableMoonCadence",
       label: "Enable moon cadence",
       description: "Use moon phase as a planning cadence modifier.",
@@ -1038,6 +1121,18 @@ export default function App() {
     label: weekdayLabels[index] || day.dateISO,
     value: index,
   }));
+
+  const providerAttributions = weeklyPlan
+    ? Array.from(
+      new Map(
+        (weeklyPlan.days || [])
+          .flatMap((day) => Object.values(day.meals || {}))
+          .flat()
+          .filter((meal) => meal?.sourceAttribution?.name && meal?.sourceAttribution?.link)
+          .map((meal) => [meal.sourceAttribution.name, meal.sourceAttribution])
+      ).values()
+    )
+    : [];
 
   const activeDayData = weeklyPlan?.days?.[activePlanDay] || null;
   const activeDayMoonPhase = activeDayData?.dateISO
@@ -1532,6 +1627,10 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              <p className="helper">
+                Recipe provider uses TheMealDB test key "1" for development/education only.
+                Public app-store release needs a supporter key per TheMealDB docs.
+              </p>
             </div>
             {isLoading ? (
               <div className="loading-state" role="status" aria-live="polite">
@@ -1661,6 +1760,19 @@ export default function App() {
                     <p>No rationale yet. Generate a plan to see details.</p>
                   )}
                 </div>
+
+                {providerAttributions.length ? (
+                  <div className="disclaimer-note">
+                    External recipe attribution: {providerAttributions.map((item, index) => (
+                      <span key={item.name}>
+                        {index > 0 ? ", " : ""}
+                        <a href={item.link} target="_blank" rel="noreferrer">
+                          {item.name}
+                        </a>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </>
             ) : (
               <div className="empty-state">
@@ -1886,6 +1998,10 @@ export default function App() {
                   </label>
                 ))}
               </div>
+              <p className="helper">
+                Recipe provider uses TheMealDB test key "1" for development/education only.
+                Public app-store release needs a supporter key per TheMealDB docs.
+              </p>
             </div>
             <div className="card">
               <h3>Cycle Preferences</h3>
@@ -2141,6 +2257,48 @@ export default function App() {
               <div className="card">
                 <h3>Pantry</h3>
                 <p>Track pantry items for pantry-first planning.</p>
+                <div className="form-grid">
+                  <label>
+                    Add by barcode (Open Food Facts)
+                    <input
+                      type="text"
+                      value={pantryBarcode}
+                      onChange={(event) => setPantryBarcode(event.target.value)}
+                      placeholder="e.g. 3017620422003"
+                    />
+                  </label>
+                  <button type="button" className="ghost" onClick={handleLookupPantryBarcode}>
+                    Lookup barcode
+                  </button>
+                </div>
+                <div className="form-grid">
+                  <label>
+                    Add generic ingredient (USDA FDC)
+                    <input
+                      type="text"
+                      value={pantryIngredientQuery}
+                      onChange={(event) => setPantryIngredientQuery(event.target.value)}
+                      placeholder="e.g. rolled oats"
+                    />
+                  </label>
+                  <button type="button" className="ghost" onClick={handleSearchPantryIngredient}>
+                    Search USDA
+                  </button>
+                </div>
+                {pantryIngredientHits.length ? (
+                  <div className="chip-row">
+                    {pantryIngredientHits.map((hit) => (
+                      <button
+                        key={`fdc-hit-${hit.id}`}
+                        type="button"
+                        className="chip"
+                        onClick={() => handleAddPantryIngredientHit(hit)}
+                      >
+                        {hit.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 <form onSubmit={addPantryItem} className="form-grid">
                   <label>
                     Item
@@ -2169,6 +2327,16 @@ export default function App() {
                       value={pantryInput.unit}
                       onChange={(event) =>
                         setPantryInput((current) => ({ ...current, unit: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Barcode (optional)
+                    <input
+                      type="text"
+                      value={pantryInput.barcode || ""}
+                      onChange={(event) =>
+                        setPantryInput((current) => ({ ...current, barcode: event.target.value }))
                       }
                     />
                   </label>
