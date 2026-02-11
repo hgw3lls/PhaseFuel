@@ -1060,3 +1060,37 @@ textarea {
   border: 1px solid var(--border);
   background: linear-gradient(90deg, #f3f1ef 0%, #faf8f6 50%, #f3f1ef 100%);
 }
+
+.ai-mode-row {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.segmented-control {
+  display: inline-flex;
+  border: var(--borderWidth) solid var(--border);
+}
+
+.segmented-control button {
+  border: 0;
+  padding: 0.4rem 0.75rem;
+  background: var(--surface);
+}
+
+.segmented-control button.active {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.byok-panel {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border: var(--borderWidth) solid var(--border);
+  background: var(--surface);
+}
+
+.warning-banner {
+  margin: 0;
+  color: #7c4b00;
+}
