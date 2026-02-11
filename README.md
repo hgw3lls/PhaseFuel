@@ -1,6 +1,6 @@
-# PhaseFuel
+# .
 
-PhaseFuel is a Vite + React single-page app with a deterministic meal-planning core and a constrained AI narration layer. Plans are generated locally from the embedded recipe dataset and stored in `localStorage` by user ID.
+. (pronounced Period) is a Vite + React single-page app with a deterministic meal-planning core and a constrained AI narration layer. Plans are generated locally from the embedded recipe dataset and stored in `localStorage` by user ID.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ PhaseFuel is a Vite + React single-page app with a deterministic meal-planning c
 
 ## Disclaimers
 
-PhaseFuel provides symbolic guidance and meal suggestions only. It is **not medical advice**, diagnosis, or treatment. If you have health concerns, consult a qualified professional.
+. provides symbolic guidance and meal suggestions only. It is **not medical advice**, diagnosis, or treatment. If you have health concerns, consult a qualified professional.
 
 ## Privacy
 
@@ -46,7 +46,7 @@ The app ships with starter data in `/data/out`. If you introduce a pipeline to n
 
 ### Dataset pipeline (self-contained)
 
-PhaseFuel includes a local pipeline that can rebuild `/data/out` without any external network access:
+. includes a local pipeline that can rebuild `/data/out` without any external network access:
 
 ```bash
 npm run dataset:build

@@ -47,7 +47,7 @@ import { createFdcProvider } from "./providers/nutrition/fdc.js";
 const GROCERY_CHECK_KEY = "phasefuel_grocery_checks";
 
 const VIEW_LABELS = {
-  today: "Today",
+  today: "Home",
   plan: "Plan",
   grocery: "Grocery",
   profile: "Profile",
@@ -1191,10 +1191,10 @@ export default function App() {
     <div className="app-shell">
       <header className="top-bar">
         <div className="top-left">
-          <span className="brand-dot" aria-hidden="true" />
+          <span className="brand-dot" aria-hidden="true">.</span>
           <div>
-            <div className="screen-title">{VIEW_LABELS[activeView]}</div>
-            <div className="screen-subtitle">PhaseFuel</div>
+            <div className="screen-title">.</div>
+            <div className="screen-subtitle">Period</div>
           </div>
         </div>
         <button type="button" className="icon-button" onClick={toggleDrawer} aria-label="Menu">
@@ -1243,7 +1243,7 @@ export default function App() {
         {activeView === "today" ? (
           <section className="screen">
             <div className="hero-block">
-              <h1>Today</h1>
+              <h1>Home</h1>
               <p className="hero-subline">Build your week in under a minute.</p>
               <div className="onboarding-panel" aria-live="polite">
                 <div className="onboarding-header">
@@ -1821,7 +1821,7 @@ export default function App() {
               </>
             ) : (
               <div className="empty-state">
-                <p>No plan generated yet. Head to Today and generate a plan.</p>
+                <p>No plan generated yet. Head to Home and generate a plan.</p>
               </div>
             )}
           </section>
@@ -1964,7 +1964,7 @@ export default function App() {
             <div className="card">
               <h3>Privacy</h3>
               <p>
-                PhaseFuel never stores secret keys in the browser. AI narration runs through the
+                . never stores secret keys in the browser. AI narration runs through the
                 backend proxy with rate limits.
               </p>
             </div>
@@ -2017,7 +2017,7 @@ export default function App() {
             <div className="card">
               <h3>Disclaimers</h3>
               <p>
-                PhaseFuel is not medical advice. Low-FODMAP guidance is portion-sensitive and this
+                . is not medical advice. Low-FODMAP guidance is portion-sensitive and this
                 planner uses conservative heuristics.
               </p>
             </div>
