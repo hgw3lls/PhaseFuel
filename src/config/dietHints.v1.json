@@ -1,0 +1,5 @@
+{
+  "highFodmapHints": ["garlic", "onion", "shallot", "wheat", "rye", "barley", "cauliflower", "apple", "honey"],
+  "meatCategoryHints": ["meat", "poultry", "beef", "pork", "lamb"],
+  "fishCategoryHints": ["fish", "seafood", "shellfish"]
+}

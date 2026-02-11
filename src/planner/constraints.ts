@@ -1,3 +1,5 @@
+import dietHintsData from "../config/dietHints.v1.json";
+
 export type IngredientCatalogRecord = {
   id: string;
   name?: string;
@@ -22,9 +24,16 @@ export type RecipeLike = {
   tags?: string[];
 };
 
-const HIGH_FODMAP_HINTS = ["garlic", "onion", "shallot", "wheat", "rye", "barley", "cauliflower", "apple", "honey"];
-const MEAT_CATEGORY_HINTS = ["meat", "poultry", "beef", "pork", "lamb"];
-const FISH_CATEGORY_HINTS = ["fish", "seafood", "shellfish"];
+const DEFAULT_HIGH_FODMAP_HINTS = ["garlic", "onion", "shallot", "wheat", "rye", "barley", "cauliflower", "apple", "honey"];
+const DEFAULT_MEAT_CATEGORY_HINTS = ["meat", "poultry", "beef", "pork", "lamb"];
+const DEFAULT_FISH_CATEGORY_HINTS = ["fish", "seafood", "shellfish"];
+
+const asHintArray = (value: unknown, fallback: string[]): string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string") ? value : fallback;
+
+const HIGH_FODMAP_HINTS = asHintArray(dietHintsData?.highFodmapHints, DEFAULT_HIGH_FODMAP_HINTS);
+const MEAT_CATEGORY_HINTS = asHintArray(dietHintsData?.meatCategoryHints, DEFAULT_MEAT_CATEGORY_HINTS);
+const FISH_CATEGORY_HINTS = asHintArray(dietHintsData?.fishCategoryHints, DEFAULT_FISH_CATEGORY_HINTS);
 
 const normalize = (value: string): string => value.toLowerCase().trim();
 
