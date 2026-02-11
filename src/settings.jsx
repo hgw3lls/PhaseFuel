@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 const SETTINGS_STORAGE_KEY = "phasefuel.settings.v1";
-const SETTINGS_VERSION = 3;
+const SETTINGS_VERSION = 4;
 
 /**
  * @typedef {Object} FeatureFlags
@@ -40,6 +40,8 @@ const SETTINGS_VERSION = 3;
  * @property {"off"|"moderate"|"strict"} lowFodmapMode
  * @property {boolean} includeSnacks
  * @property {number} maxRepeatsPerWeek
+ * @property {boolean} enableMoonCadence
+ * @property {boolean} sleepSensitive
  */
 
 const DEFAULT_CYCLE_PREFERENCES = {
@@ -75,6 +77,8 @@ const DEFAULT_SETTINGS = {
   lowFodmapMode: "off",
   includeSnacks: true,
   maxRepeatsPerWeek: 2,
+  enableMoonCadence: true,
+  sleepSensitive: false,
 };
 
 const coerceBoolean = (value, fallback) => (typeof value === "boolean" ? value : fallback);
@@ -171,6 +175,8 @@ const normalizeSettings = (candidate) => {
       candidate.maxRepeatsPerWeek,
       DEFAULT_SETTINGS.maxRepeatsPerWeek
     ),
+    enableMoonCadence: coerceBoolean(candidate.enableMoonCadence, DEFAULT_SETTINGS.enableMoonCadence),
+    sleepSensitive: coerceBoolean(candidate.sleepSensitive, DEFAULT_SETTINGS.sleepSensitive),
   };
 };
 

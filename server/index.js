@@ -3,7 +3,7 @@ import { URL } from "node:url";
 import { buildNarrativeFallbackPayload } from "../src/config/narrative.js";
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
-const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 const DEFAULT_OPENAI_TEMPERATURE = 0.2;
 
 const sendJson = (res, statusCode, payload) => {
@@ -74,6 +74,43 @@ const fallbackResponse = (reason = "AI unavailable") =>
     dayNotes: [],
   });
 
+const normalizeNarrative = (candidate, fallbackReason) => {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return fallbackResponse(fallbackReason);
+  }
+
+  return {
+    summaryText:
+      typeof candidate.summaryText === "string" && candidate.summaryText.trim()
+        ? candidate.summaryText
+        : fallbackResponse(fallbackReason).summaryText,
+    dayNotes: Array.isArray(candidate.dayNotes) ? candidate.dayNotes : [],
+    groceryByAisle: Array.isArray(candidate.groceryByAisle) ? candidate.groceryByAisle : [],
+    substitutions: Array.isArray(candidate.substitutions) ? candidate.substitutions : [],
+  };
+};
+
+const extractResponseText = (responsePayload) => {
+  if (typeof responsePayload?.output_text === "string" && responsePayload.output_text.trim()) {
+    return responsePayload.output_text;
+  }
+
+  const output = Array.isArray(responsePayload?.output) ? responsePayload.output : [];
+  for (const item of output) {
+    const content = Array.isArray(item?.content) ? item.content : [];
+    for (const block of content) {
+      if (block?.type === "output_text" && typeof block.text === "string" && block.text.trim()) {
+        return block.text;
+      }
+      if (block?.type === "text" && typeof block?.text?.value === "string" && block.text.value.trim()) {
+        return block.text.value;
+      }
+    }
+  }
+
+  return "";
+};
+
 const port = process.env.PORT || 3001;
 
 const server = http.createServer(async (req, res) => {
@@ -111,7 +148,7 @@ const server = http.createServer(async (req, res) => {
         allowedTokens,
       });
 
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      const response = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -120,10 +157,11 @@ const server = http.createServer(async (req, res) => {
         body: JSON.stringify({
           model: process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
           temperature: parseTemperature(process.env.OPENAI_TEMPERATURE),
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
+          input: [
+            { role: "system", content: [{ type: "input_text", text: system }] },
+            { role: "user", content: [{ type: "input_text", text: user }] },
           ],
+          response_format: { type: "json_object" },
         }),
       });
 
@@ -133,9 +171,18 @@ const server = http.createServer(async (req, res) => {
       }
 
       const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || "";
-      const parsed = JSON.parse(content);
-      sendJson(res, 200, parsed);
+      const outputText = extractResponseText(data);
+      if (!outputText) {
+        sendJson(res, 200, fallbackResponse("Response missing text output"));
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(outputText);
+        sendJson(res, 200, normalizeNarrative(parsed, "Response shape invalid"));
+      } catch (error) {
+        sendJson(res, 200, fallbackResponse("Response JSON parse failed"));
+      }
     } catch (error) {
       sendJson(res, 200, fallbackResponse("Parsing failed"));
     }

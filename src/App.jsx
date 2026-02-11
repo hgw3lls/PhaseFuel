@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSettings, DEFAULT_SETTINGS } from "./settings.jsx";
 import { estimatePhase } from "./lib/cycle.js";
 import { getMoonPhaseBucket } from "./lib/moon.js";
@@ -13,7 +13,12 @@ import { warmPhaseFuelData } from "./data/warmup";
 import { toRecipeCard } from "./data/viewModel";
 import DatasetDiagnostics from "./dev/DatasetDiagnostics";
 import { generateWeeklyPlan, swapMealInPlan } from "./lib/planner.js";
-import { buildFallbackNarrative, requestPlanNarrative } from "./lib/ai.js";
+import { buildFallbackNarrative } from "./lib/ai.js";
+import { AI_MODE, generateNarrative } from "./ai";
+import { useApiKey } from "./ai/ApiKeyContext.jsx";
+import { getMoonPhaseFraction, getMoonPhaseName } from "./engine/moon.js";
+import { migrateIfNeeded } from "./storage/migrate.js";
+import { exportUserData, importUserData, loadUserData, resetUserData, saveUserData } from "./storage/storage.js";
 import { validatePlan } from "./lib/validatePlan.js";
 import { compileAllowed } from "./lib/diet.ts";
 import {
@@ -37,7 +42,6 @@ import {
 } from "./modules/priceMemory.js";
 import { loadHistory, MAX_HISTORY, saveHistory } from "./modules/leftoverHistory.js";
 
-const PLAN_STORAGE_KEY = "phasefuel_meal_plans";
 const GROCERY_CHECK_KEY = "phasefuel_grocery_checks";
 
 const VIEW_LABELS = {
@@ -115,11 +119,6 @@ const MOON_GUIDANCE = {
   },
 };
 
-const getStoredPlans = () => {
-  const raw = localStorage.getItem(PLAN_STORAGE_KEY);
-  return raw ? JSON.parse(raw) : {};
-};
-
 const getStoredChecks = () => {
   const raw = localStorage.getItem(GROCERY_CHECK_KEY);
   return raw ? JSON.parse(raw) : {};
@@ -188,6 +187,7 @@ const buildGroceryList = (plan) => {
 };
 
 export default function App() {
+  const { apiKey, setApiKey, clearApiKey, rememberInSession, setRememberInSession } = useApiKey();
   const [userId, setUserId] = useState("");
   const [cycleDay, setCycleDay] = useState("");
   const [symptoms, setSymptoms] = useState("");
@@ -218,6 +218,7 @@ export default function App() {
   const [prepSteps, setPrepSteps] = useState([]);
   const [estimatedCost, setEstimatedCost] = useState(null);
   const [lookupUserId, setLookupUserId] = useState("");
+  const [aiMode, setAiMode] = useState(AI_MODE.HOSTED);
   const [savedPlan, setSavedPlan] = useState("No saved plan loaded.");
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStartedAt, setLoadingStartedAt] = useState(null);
@@ -241,6 +242,8 @@ export default function App() {
   const [groceryChecks, setGroceryChecks] = useState(() => getStoredChecks());
   const { settings, setSettings, updateSettings } = useSettings();
 
+  const importInputRef = useRef(null);
+
   const data = dataState.data;
   const recipes = data?.recipes || [];
   const recipeById = useMemo(() => new Map(recipes.map((recipe) => [recipe.id, recipe])), [recipes]);
@@ -249,7 +252,6 @@ export default function App() {
   const mealTypeOptions = data?.mealTypes || ["breakfast", "lunch", "dinner", "snack"];
   const isDataReady = dataState.status === "ready";
 
-  const plansByUser = useMemo(() => getStoredPlans(), [weeklyPlan, savedPlan]);
   const selectedIngredients = useMemo(
     () =>
       filterIngredientIds
@@ -365,6 +367,13 @@ export default function App() {
   }, [activePlanDay, weeklyPlan]);
 
 
+  useEffect(() => {
+    if (!userId.trim()) {
+      return;
+    }
+    ensureMigrationForUser(userId.trim());
+  }, [userId]);
+
   const handleSettingsChange = (key, value) => {
     updateSettings({ [key]: value });
   };
@@ -431,6 +440,59 @@ export default function App() {
     maxRepeatsPerWeek: settings.maxRepeatsPerWeek,
     ingredientCatalog,
   });
+
+  const toWeekPlanV2 = (plan, ownerUserId) => ({
+    version: 2,
+    userId: ownerUserId,
+    startDate: plan.startDateISO || plan.weekStartISO || new Date().toISOString().slice(0, 10),
+    generatedAt: new Date().toISOString(),
+    signals: {
+      enableMoonCadence: settings.enableMoonCadence,
+      sleepSensitive: settings.sleepSensitive,
+    },
+    days: (plan.days || []).map((day) => ({
+      date: day.dateISO,
+      phase: (day.phase || cycleInfo.phase || "").toUpperCase(),
+      moonPhase: getMoonPhaseName(getMoonPhaseFraction(day.dateISO)),
+      macroRanges: day.macroRanges || null,
+      emphasis: day.emphasis || { emphasize: [], limit: [], mealStyle: [] },
+      meals: {
+        breakfast: day.meals?.breakfast || null,
+        lunch: day.meals?.lunch || null,
+        dinner: day.meals?.dinner || null,
+        snacks: [day.meals?.snack].filter(Boolean),
+      },
+      prepTasks: day.prepTasks || [],
+      source: "current",
+    })),
+  });
+
+  const fromWeekPlanV2 = (weekPlan) => ({
+    startDateISO: weekPlan.startDate,
+    days: (weekPlan.days || []).map((day) => ({
+      dateISO: day.date,
+      phase: (day.phase || "").toLowerCase(),
+      meals: {
+        breakfast: day.meals?.breakfast || null,
+        lunch: day.meals?.lunch || null,
+        dinner: day.meals?.dinner || null,
+        snack: day.meals?.snacks?.[0] || null,
+      },
+      notes: day.notes || "",
+    })),
+  });
+
+  const ensureMigrationForUser = (targetUserId) => {
+    if (!targetUserId?.trim()) {
+      return;
+    }
+    migrateIfNeeded(targetUserId.trim());
+  };
+
+  const getUserData = (targetUserId) => {
+    ensureMigrationForUser(targetUserId);
+    return loadUserData(targetUserId.trim());
+  };
 
   const toggleDietFlag = (flag) => {
     setFilterDietFlags((current) =>
@@ -561,25 +623,33 @@ export default function App() {
         profileSummary,
       });
 
-      const narrative = await requestPlanNarrative({
+      const narrativePayload = {
         profileSummary,
         weekStartISO: nextPlan.startDateISO || nextPlan.weekStartISO || "",
         weeklyPlanJson: nextPlan,
         allowedTokens: Array.from(allowedTokens),
-        fallback: fallbackNarrative,
-      });
+      };
+
+      const narrative = await generateNarrative(narrativePayload, {
+        mode: aiMode,
+        apiKey: aiMode === AI_MODE.BYOK ? apiKey : undefined,
+      }).catch(() => fallbackNarrative);
       setPlanNarrative(narrative);
 
-      const updatedPlans = {
-        ...plansByUser,
-        [userId.trim()]: {
-          cycle_day: Number(cycleDay),
+      const normalizedUserId = userId.trim();
+      const currentUserData = getUserData(normalizedUserId);
+      const weekPlanV2 = toWeekPlanV2(nextPlan, normalizedUserId);
+
+      saveUserData(normalizedUserId, {
+        ...currentUserData,
+        profile: {
+          ...currentUserData.profile,
+          cycleDay: Number(cycleDay),
           symptoms: symptoms.trim(),
-          weekly_plan: nextPlan,
-          settings_snapshot: settings,
+          settingsSnapshot: settings,
         },
-      };
-      localStorage.setItem(PLAN_STORAGE_KEY, JSON.stringify(updatedPlans));
+        plans: [...currentUserData.plans, weekPlanV2],
+      });
       setStatus("Meal plan saved locally.");
     } catch (error) {
       setStatus(`Failed to generate plan: ${error.message}`);
@@ -607,12 +677,16 @@ export default function App() {
       setSavedPlan("Enter a user ID to load a saved plan.");
       return;
     }
-    const planData = plansByUser[lookupUserId.trim()];
-    if (!planData) {
+
+    const userData = getUserData(lookupUserId.trim());
+    const latestPlan = userData.plans[userData.plans.length - 1];
+    if (!latestPlan) {
       setSavedPlan(`No saved plan found for ${lookupUserId.trim()}.`);
       return;
     }
-    setSavedPlan(JSON.stringify(planData, null, 2));
+
+    setWeeklyPlan(fromWeekPlanV2(latestPlan));
+    setSavedPlan(JSON.stringify(latestPlan, null, 2));
   };
 
   const handleClearPlan = () => {
@@ -620,14 +694,64 @@ export default function App() {
       setSavedPlan("Enter a user ID to clear a saved plan.");
       return;
     }
-    const updatedPlans = { ...plansByUser };
-    if (updatedPlans[lookupUserId.trim()]) {
-      delete updatedPlans[lookupUserId.trim()];
-      localStorage.setItem(PLAN_STORAGE_KEY, JSON.stringify(updatedPlans));
-      setSavedPlan(`Cleared saved plan for ${lookupUserId.trim()}.`);
-    } else {
-      setSavedPlan(`No saved plan found for ${lookupUserId.trim()}.`);
+
+    resetUserData(lookupUserId.trim());
+    setSavedPlan(`Cleared saved plan for ${lookupUserId.trim()}.`);
+  };
+
+  const handleExportData = () => {
+    if (!userId.trim()) {
+      setStatus("Enter a user ID before exporting data.");
+      return;
     }
+
+    const exportJson = exportUserData(userId.trim());
+    const blob = new Blob([exportJson], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `phasefuel-user-${userId.trim()}-v2.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setStatus("User data exported.");
+  };
+
+  const handleImportDataClick = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportDataFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    if (!userId.trim()) {
+      setStatus("Enter a user ID before importing data.");
+      return;
+    }
+
+    try {
+      const payload = await file.text();
+      importUserData(userId.trim(), payload);
+      setStatus("User data imported and merged.");
+    } catch (error) {
+      setStatus("Import failed. Ensure the JSON file is valid.");
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const handleResetLocalData = () => {
+    if (!userId.trim()) {
+      setStatus("Enter a user ID before resetting local data.");
+      return;
+    }
+
+    resetUserData(userId.trim());
+    setWeeklyPlan(null);
+    setSavedPlan("No saved plan loaded.");
+    setStatus("Local v2 user data reset.");
   };
 
   const handleCopyGroceries = async () => {
@@ -854,6 +978,20 @@ export default function App() {
       value: settings.includeSnacks,
       onChange: () => updateSettings({ includeSnacks: !settings.includeSnacks }),
     },
+    {
+      key: "enableMoonCadence",
+      label: "Enable moon cadence",
+      description: "Use moon phase as a planning cadence modifier.",
+      value: settings.enableMoonCadence,
+      onChange: () => updateSettings({ enableMoonCadence: !settings.enableMoonCadence }),
+    },
+    {
+      key: "sleepSensitive",
+      label: "Sleep sensitive",
+      description: "Prefer calmer evening snack planning on full moon days.",
+      value: settings.sleepSensitive,
+      onChange: () => updateSettings({ sleepSensitive: !settings.sleepSensitive }),
+    },
   ];
 
   const featureFlags = [
@@ -902,6 +1040,9 @@ export default function App() {
   }));
 
   const activeDayData = weeklyPlan?.days?.[activePlanDay] || null;
+  const activeDayMoonPhase = activeDayData?.dateISO
+    ? getMoonPhaseName(getMoonPhaseFraction(activeDayData.dateISO))
+    : null;
   const activeRecipeMeal =
     activeRecipeMealType && activeDayData?.meals ? activeDayData.meals[activeRecipeMealType] : null;
   const activeRecipeDetails =
@@ -1091,6 +1232,53 @@ export default function App() {
                 <details className="accordion stretch" open={false}>
                   <summary>Advanced preferences</summary>
                   <div className="accordion-body">
+                    <div className="ai-mode-row">
+                      <span>AI Mode</span>
+                      <div className="segmented-control" role="radiogroup" aria-label="AI mode">
+                        <button
+                          type="button"
+                          className={aiMode === AI_MODE.HOSTED ? "active" : ""}
+                          onClick={() => setAiMode(AI_MODE.HOSTED)}
+                        >
+                          Hosted
+                        </button>
+                        <button
+                          type="button"
+                          className={aiMode === AI_MODE.BYOK ? "active" : ""}
+                          onClick={() => setAiMode(AI_MODE.BYOK)}
+                        >
+                          BYOK
+                        </button>
+                      </div>
+                    </div>
+                    {aiMode === AI_MODE.BYOK ? (
+                      <div className="byok-panel">
+                        <p className="helper warning-banner">
+                          Key stays in your browser; don’t use on shared computers.
+                        </p>
+                        <label>
+                          OpenAI API Key
+                          <input
+                            type="password"
+                            value={apiKey}
+                            onChange={(event) => setApiKey(event.target.value)}
+                            placeholder="sk-..."
+                            autoComplete="off"
+                          />
+                        </label>
+                        <label className="checkbox-row">
+                          <input
+                            type="checkbox"
+                            checked={rememberInSession}
+                            onChange={(event) => setRememberInSession(event.target.checked)}
+                          />
+                          Remember until tab closes
+                        </label>
+                        <button type="button" className="link-button" onClick={clearApiKey}>
+                          Clear Key
+                        </button>
+                      </div>
+                    ) : null}
                     <label>
                       Dietary Preferences
                       <input
@@ -1376,6 +1564,8 @@ export default function App() {
 
                 <div className="plan-section">
                   <h3>{activeDayData ? `Day ${activePlanDay + 1}` : "Select a day"}</h3>
+                  {activeDayMoonPhase ? <p className="helper">Moon phase: {activeDayMoonPhase}</p> : null}
+                  {activeDayData?.notes ? <p className="helper">Notes: {activeDayData.notes}</p> : null}
                   {activeDayData ? (
                     ["breakfast", "lunch", "dinner", "snack"]
                       .filter((mealType) => activeDayData.meals[mealType])
@@ -1458,6 +1648,7 @@ export default function App() {
 
                 <div className="why-panel">
                   <h3>Why this plan?</h3>
+                  {activeDayData?.notes ? <p className="helper">Notes: {activeDayData.notes}</p> : null}
                   {activeDayData ? (
                     <ul>
                       {Object.values(activeDayData.meals).flatMap((meal) =>
@@ -1919,6 +2110,29 @@ export default function App() {
                 ))}
               </div>
             </div>
+            <div className="card">
+              <h3>Data Portability</h3>
+              <p className="helper">Export, import, or reset local v2 data for the current user.</p>
+              <div className="secondary-actions">
+                <button type="button" className="ghost" onClick={handleExportData}>
+                  Export data
+                </button>
+                <button type="button" className="ghost" onClick={handleImportDataClick}>
+                  Import data
+                </button>
+                <button type="button" className="ghost" onClick={handleResetLocalData}>
+                  Reset local data
+                </button>
+              </div>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json"
+                onChange={handleImportDataFile}
+                style={{ display: "none" }}
+              />
+            </div>
+
             <button type="button" className="ghost" onClick={handleResetDefaults}>
               Reset to Defaults
             </button>
