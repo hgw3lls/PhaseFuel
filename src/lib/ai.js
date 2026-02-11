@@ -1,15 +1,15 @@
+import { NARRATIVE_COPY, buildNarrativeFallbackPayload } from "../config/narrative";
+
 export const buildFallbackNarrative = ({ weeklyPlan, profileSummary }) => {
   const dayNotes = weeklyPlan?.days?.map((day) => ({
     date: day.dateISO,
-    note: `Focus on ${day.phase} phase support with simple prep.`,
+    note: NARRATIVE_COPY.fallbackDayNoteTemplate(day.phase),
   })) || [];
 
-  return {
-    summaryText: `Personalized plan generated for ${profileSummary}. Not medical advice.`,
+  return buildNarrativeFallbackPayload({
+    summaryContext: profileSummary,
     dayNotes,
-    groceryByAisle: [],
-    substitutions: [],
-  };
+  });
 };
 
 export const requestPlanNarrative = async ({

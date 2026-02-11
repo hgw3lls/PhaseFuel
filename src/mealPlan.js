@@ -84,61 +84,69 @@ const TRANSFORMATION_TAGS = ["wrap", "bowl", "salad", "soup", "fried-rice"];
  * @property {{min: number, max: number, currency: string} | null} estimatedCost
  */
 
-const MEAL_PLAN_SCHEMA = `Return STRICT JSON with this shape and no extra commentary:\n\n{
-  "mealPlan": {
-    "days": [
+const MEAL_PLAN_SCHEMA_EXAMPLE = {
+  mealPlan: {
+    days: [
       {
-        "day": 1,
-        "meals": {
-          "breakfast": { "name": "", "ingredients": [""] },
-          "lunch": {
-            "name": "",
-            "ingredients": [""],
-            "leftoverFrom": { "day": 1, "dinner": "" },
-            "extraIngredients": [""]
+        day: 1,
+        meals: {
+          breakfast: { name: "", ingredients: [""] },
+          lunch: {
+            name: "",
+            ingredients: [""],
+            leftoverFrom: { day: 1, dinner: "" },
+            extraIngredients: [""],
           },
-          "dinner": {
-            "name": "",
-            "ingredients": [""],
-            "servingsCooked": 4,
-            "servingsDinner": 2,
-            "leftoverPortions": 2,
-            "batchTag": "protein-base",
-            "transformationOptions": ["wrap", "bowl"],
-            "freezeFriendly": false,
-            "freezePortions": 0
+          dinner: {
+            name: "",
+            ingredients: [""],
+            servingsCooked: 4,
+            servingsDinner: 2,
+            leftoverPortions: 2,
+            batchTag: "protein-base",
+            transformationOptions: ["wrap", "bowl"],
+            freezeFriendly: false,
+            freezePortions: 0,
           },
-          "snacks": { "name": "", "ingredients": [""] }
-        }
-      }
+          snacks: { name: "", ingredients: [""] },
+        },
+      },
     ],
-    "leftoversGraph": [
+    leftoversGraph: [
       {
-        "fromDayIndex": 1,
-        "toDayIndex": 2,
-        "fromMeal": "dinner",
-        "toMeal": "lunch",
-        "transformationId": ""
-      }
-    ]
-  },
-  "groceryList": {
-    "items": [
-      {
-        "name": "",
-        "qty": "",
-        "unit": "",
-        "category": "",
-        "notes": [""],
-        "estCost": 0,
-        "substitutions": [""]
-      }
+        fromDayIndex: 1,
+        toDayIndex: 2,
+        fromMeal: "dinner",
+        toMeal: "lunch",
+        transformationId: "",
+      },
     ],
-    "totals": { "estMin": 0, "estMax": 0 }
   },
-  "prepSteps": [""],
-  "estimatedCost": { "min": 0, "max": 0, "currency": "USD" }
-}`;
+  groceryList: {
+    items: [
+      {
+        name: "",
+        qty: "",
+        unit: "",
+        category: "",
+        notes: [""],
+        estCost: 0,
+        substitutions: [""],
+      },
+    ],
+    totals: { estMin: 0, estMax: 0 },
+  },
+  prepSteps: [""],
+  estimatedCost: { min: 0, max: 0, currency: "USD" },
+};
+
+const MEAL_PLAN_SCHEMA = `Return STRICT JSON with this shape and no extra commentary:
+
+${JSON.stringify(
+  MEAL_PLAN_SCHEMA_EXAMPLE,
+  null,
+  2
+)}`;
 
 const isString = (value) => typeof value === "string" && value.trim().length > 0;
 const isStringArray = (value) => Array.isArray(value) && value.every(isString);

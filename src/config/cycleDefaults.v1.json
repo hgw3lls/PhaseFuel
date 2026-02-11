@@ -1,0 +1,16 @@
+{
+  "typicalCycleLength": 28,
+  "typicalLutealLength": 14,
+  "periodLength": 5,
+  "confidences": {
+    "moonOnly": 0.35,
+    "symptomOnly": 0.3,
+    "ovulationAwareLuteal": 0.8,
+    "ovulationAwareWindow": 0.85,
+    "missingLastPeriod": 0.3,
+    "menstrual": 0.7,
+    "follicular": 0.6,
+    "ovulatory": 0.65,
+    "luteal": 0.65
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "new_full": {
+    "carb": 0.03,
+    "fat": 0.02,
+    "fiber": -0.025,
+    "micronutrient": -0.025
+  },
+  "quarter": {
+    "fiber": 0.03,
+    "micronutrient": 0.02,
+    "carb": -0.025,
+    "fat": -0.025
+  }
+}

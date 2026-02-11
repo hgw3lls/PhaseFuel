@@ -1,3 +1,5 @@
+import phaseTargetsData from "../config/phaseTargets.v1.json";
+import moonModifiersData from "../config/moonModifiers.v1.json";
 import type { MenstrualPhase, MoonPhase } from "./phaseModels";
 
 export type TargetCategory = "protein" | "carb" | "fat" | "fiber" | "micronutrient";
@@ -10,7 +12,12 @@ export type PhaseTarget = {
   notes: string;
 };
 
-export const PHASE_TARGETS: Record<MenstrualPhase, PhaseTarget> = {
+type MoonModifierSet = {
+  new_full: Partial<Record<TargetCategory, number>>;
+  quarter: Partial<Record<TargetCategory, number>>;
+};
+
+const DEFAULT_PHASE_TARGETS: Record<MenstrualPhase, PhaseTarget> = {
   menstrual: {
     emphasisCategories: {
       protein: 0.28,
@@ -57,6 +64,21 @@ export const PHASE_TARGETS: Record<MenstrualPhase, PhaseTarget> = {
   },
 };
 
+const DEFAULT_MOON_MODIFIERS: MoonModifierSet = {
+  new_full: {
+    carb: 0.03,
+    fat: 0.02,
+    fiber: -0.025,
+    micronutrient: -0.025,
+  },
+  quarter: {
+    fiber: 0.03,
+    micronutrient: 0.02,
+    carb: -0.025,
+    fat: -0.025,
+  },
+};
+
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
 
 const normalizeWeights = (weights: CategoryWeights): CategoryWeights => {
@@ -73,6 +95,53 @@ const normalizeWeights = (weights: CategoryWeights): CategoryWeights => {
     micronutrient: weights.micronutrient / total,
   };
 };
+
+const isValidWeights = (weights: unknown): weights is CategoryWeights => {
+  if (!weights || typeof weights !== "object") return false;
+  const candidate = weights as Partial<CategoryWeights>;
+  return [candidate.protein, candidate.carb, candidate.fat, candidate.fiber, candidate.micronutrient].every(
+    (value) => typeof value === "number"
+  );
+};
+
+const asPhaseTargets = (raw: unknown): Record<MenstrualPhase, PhaseTarget> => {
+  if (!raw || typeof raw !== "object") {
+    return DEFAULT_PHASE_TARGETS;
+  }
+
+  const parsed = raw as Partial<Record<MenstrualPhase, PhaseTarget>>;
+  const phases: MenstrualPhase[] = ["menstrual", "follicular", "ovulation", "luteal"];
+
+  const valid = phases.every((phase) => {
+    const item = parsed[phase];
+    return (
+      !!item &&
+      isValidWeights(item.emphasisCategories) &&
+      Array.isArray(item.avoidTags) &&
+      item.avoidTags.every((tag) => typeof tag === "string") &&
+      typeof item.notes === "string"
+    );
+  });
+
+  return valid ? (parsed as Record<MenstrualPhase, PhaseTarget>) : DEFAULT_PHASE_TARGETS;
+};
+
+const asMoonModifiers = (raw: unknown): MoonModifierSet => {
+  if (!raw || typeof raw !== "object") {
+    return DEFAULT_MOON_MODIFIERS;
+  }
+  const parsed = raw as Partial<MoonModifierSet>;
+  if (!parsed.new_full || !parsed.quarter) {
+    return DEFAULT_MOON_MODIFIERS;
+  }
+  return {
+    new_full: parsed.new_full,
+    quarter: parsed.quarter,
+  };
+};
+
+export const PHASE_TARGETS = asPhaseTargets(phaseTargetsData);
+const MOON_MODIFIERS = asMoonModifiers(moonModifiersData);
 
 const adjust = (
   base: CategoryWeights,
@@ -97,21 +166,11 @@ const adjust = (
 
 export const applyMoonModifier = (weights: CategoryWeights, moonPhase: MoonPhase): CategoryWeights => {
   if (moonPhase === "new" || moonPhase === "full") {
-    return adjust(weights, {
-      carb: 0.03,
-      fat: 0.02,
-      fiber: -0.025,
-      micronutrient: -0.025,
-    });
+    return adjust(weights, MOON_MODIFIERS.new_full);
   }
 
   if (moonPhase === "first_quarter" || moonPhase === "last_quarter") {
-    return adjust(weights, {
-      fiber: 0.03,
-      micronutrient: 0.02,
-      carb: -0.025,
-      fat: -0.025,
-    });
+    return adjust(weights, MOON_MODIFIERS.quarter);
   }
 
   return normalizeWeights(weights);

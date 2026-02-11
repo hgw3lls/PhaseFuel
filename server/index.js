@@ -1,7 +1,10 @@
 import http from "node:http";
 import { URL } from "node:url";
+import { buildNarrativeFallbackPayload } from "../src/config/narrative.js";
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+const DEFAULT_OPENAI_TEMPERATURE = 0.2;
 
 const sendJson = (res, statusCode, payload) => {
   res.writeHead(statusCode, { "Content-Type": "application/json" });
@@ -60,12 +63,16 @@ const buildPrompt = ({ profileSummary, weekStartISO, weeklyPlanJson, allowedToke
   };
 };
 
-const fallbackResponse = (reason = "AI unavailable") => ({
-  summaryText: `Personalized plan generated. ${reason}. Not medical advice.`,
-  dayNotes: [],
-  groceryByAisle: [],
-  substitutions: [],
-});
+const parseTemperature = (value) => {
+  const parsed = Number.parseFloat(value ?? "");
+  return Number.isFinite(parsed) ? parsed : DEFAULT_OPENAI_TEMPERATURE;
+};
+
+const fallbackResponse = (reason = "AI unavailable") =>
+  buildNarrativeFallbackPayload({
+    summaryContext: reason,
+    dayNotes: [],
+  });
 
 const port = process.env.PORT || 3001;
 
@@ -111,8 +118,8 @@ const server = http.createServer(async (req, res) => {
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
-          temperature: 0.2,
+          model: process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
+          temperature: parseTemperature(process.env.OPENAI_TEMPERATURE),
           messages: [
             { role: "system", content: system },
             { role: "user", content: user },
