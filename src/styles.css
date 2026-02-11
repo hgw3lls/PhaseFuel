@@ -110,10 +110,10 @@ textarea {
 }
 
 .brand-dot {
-  width: 14px;
-  height: 14px;
-  background: var(--accent);
-  border-radius: 50%;
+  color: #d10000;
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .screen-title {
@@ -1130,9 +1130,9 @@ body {
 }
 
 .brand-dot {
-  border-radius: 0;
-  border: 2px solid var(--border);
-  box-shadow: 3px 3px 0 #000;
+  color: #d10000;
+  border: 0;
+  box-shadow: none;
 }
 
 .screen-title {
