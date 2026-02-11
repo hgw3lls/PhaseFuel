@@ -1152,6 +1152,27 @@ export default function App() {
     activeRecipeDetails?.steps || activeRecipeDetails?.instructions || [];
 
   const groceryGroups = groupGroceries(groceryList);
+  const onboardingSteps = [
+    {
+      id: "profile",
+      title: "Set your rhythm",
+      detail: "Add your user ID + cycle day to personalize meals.",
+      complete: Boolean(userId && cycleDay),
+    },
+    {
+      id: "plan",
+      title: "Generate your first plan",
+      detail: "Build a 3 or 7 day roadmap and swap meals as needed.",
+      complete: Boolean(weeklyPlan?.days?.length),
+    },
+    {
+      id: "grocery",
+      title: "Shop from your list",
+      detail: "Open Grocery to check off essentials while you shop.",
+      complete: Boolean(groceryList.length),
+    },
+  ];
+  const completedOnboarding = onboardingSteps.filter((step) => step.complete).length;
   const filteredGroceryGroups = Object.fromEntries(
     Object.entries(groceryGroups)
       .map(([category, items]) => {
@@ -1224,6 +1245,30 @@ export default function App() {
             <div className="hero-block">
               <h1>Today</h1>
               <p className="hero-subline">Build your week in under a minute.</p>
+              <div className="onboarding-panel" aria-live="polite">
+                <div className="onboarding-header">
+                  <h2>Quick Start</h2>
+                  <span>
+                    {completedOnboarding}/{onboardingSteps.length} complete
+                  </span>
+                </div>
+                <div className="onboarding-track" role="progressbar" aria-valuemin={0} aria-valuemax={onboardingSteps.length} aria-valuenow={completedOnboarding}>
+                  <span style={{ width: `${(completedOnboarding / onboardingSteps.length) * 100}%` }} />
+                </div>
+                <ul className="onboarding-list">
+                  {onboardingSteps.map((step) => (
+                    <li key={step.id} className={step.complete ? "is-complete" : ""}>
+                      <div>
+                        <strong>{step.title}</strong>
+                        <p>{step.detail}</p>
+                      </div>
+                      <button type="button" className="ghost" onClick={() => handleNav(step.id)}>
+                        {step.complete ? "Review" : "Go"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
               <div className="info-pill">
                 Day {(cycleDay || "--")} • {formatPhase(cycleInfo.phase)} • {moonInfo.phase}
               </div>
