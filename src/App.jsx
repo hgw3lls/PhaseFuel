@@ -45,6 +45,12 @@ import { createOffProvider } from "./providers/nutrition/off.js";
 import { createFdcProvider } from "./providers/nutrition/fdc.js";
 
 const GROCERY_CHECK_KEY = "phasefuel_grocery_checks";
+const AUTH_SESSION_KEY = "phasefuel.auth.v1";
+
+const LOGIN_USERS = {
+  Maggie: { password: "Demo", role: "user", userId: "Maggie" },
+  admin: { password: "admin", role: "admin", userId: "admin" },
+};
 
 const VIEW_LABELS = {
   today: "Home",
@@ -247,6 +253,30 @@ export default function App() {
   const [filterIngredientIds, setFilterIngredientIds] = useState([]);
   const [filterError, setFilterError] = useState("");
   const [groceryChecks, setGroceryChecks] = useState(() => getStoredChecks());
+  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+  const [authError, setAuthError] = useState("");
+  const [session, setSession] = useState(() => {
+    const savedSession = localStorage.getItem(AUTH_SESSION_KEY);
+    if (!savedSession) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(savedSession);
+      const knownUser = parsed?.username ? LOGIN_USERS[parsed.username] : null;
+      if (!knownUser) {
+        localStorage.removeItem(AUTH_SESSION_KEY);
+        return null;
+      }
+      return {
+        username: parsed.username,
+        role: knownUser.role,
+        userId: knownUser.userId,
+      };
+    } catch {
+      localStorage.removeItem(AUTH_SESSION_KEY);
+      return null;
+    }
+  });
   const { settings, setSettings, updateSettings } = useSettings();
 
   const importInputRef = useRef(null);
@@ -380,6 +410,16 @@ export default function App() {
     }
     ensureMigrationForUser(userId.trim());
   }, [userId]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    setUserId(session.userId);
+    if (session.role === "admin") {
+      setActiveView("settings");
+    }
+  }, [session]);
 
   const handleSettingsChange = (key, value) => {
     updateSettings({ [key]: value });
@@ -895,6 +935,35 @@ export default function App() {
     setDrawerOpen(false);
   };
 
+  const handleLoginSubmit = (event) => {
+    event.preventDefault();
+    const username = loginForm.username.trim();
+    const account = LOGIN_USERS[username];
+    if (!account || account.password !== loginForm.password) {
+      setAuthError("Invalid credentials. Use Maggie/Demo or admin/admin.");
+      return;
+    }
+    const nextSession = {
+      username,
+      role: account.role,
+      userId: account.userId,
+    };
+    localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({ username }));
+    setSession(nextSession);
+    setAuthError("");
+    setLoginForm({ username: "", password: "" });
+    setStatus(`Logged in as ${username}.`);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem(AUTH_SESSION_KEY);
+    setSession(null);
+    setUserId("");
+    setActiveView("today");
+    setDrawerOpen(false);
+    setStatus("Logged out.");
+  };
+
   const renderMealIngredients = (ingredients) => {
     if (!ingredients?.length) {
       return <p>No ingredients listed.</p>;
@@ -1187,6 +1256,45 @@ export default function App() {
   const groceryCount = groceryList.length;
   const groceryTotals = null;
 
+  if (!session) {
+    return (
+      <div className="app-shell">
+        <main className="app-main">
+          <section className="screen">
+            <div className="card">
+              <h2>Log in to PhaseFuel</h2>
+              <p className="helper">User: Maggie / Demo • Admin: admin / admin</p>
+              <form onSubmit={handleLoginSubmit} className="form-grid">
+                <label>
+                  Username
+                  <input
+                    type="text"
+                    value={loginForm.username}
+                    onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))}
+                    placeholder="Maggie"
+                    required
+                  />
+                </label>
+                <label>
+                  Password
+                  <input
+                    type="password"
+                    value={loginForm.password}
+                    onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))}
+                    placeholder="Demo"
+                    required
+                  />
+                </label>
+                <button type="submit">Log In</button>
+                {authError ? <p className="helper warning-banner">{authError}</p> : null}
+              </form>
+            </div>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <header className="top-bar">
@@ -1201,6 +1309,9 @@ export default function App() {
           <span className="icon-line" />
           <span className="icon-line" />
           <span className="icon-line" />
+        </button>
+        <button type="button" className="ghost" onClick={handleLogout}>
+          Log out
         </button>
       </header>
 
@@ -1328,6 +1439,7 @@ export default function App() {
                       onChange={(event) => setUserId(event.target.value)}
                       placeholder="alex"
                       required
+                      readOnly
                     />
                   </label>
                   <label>
@@ -1372,6 +1484,7 @@ export default function App() {
                 <details className="accordion stretch" open={false}>
                   <summary>Advanced preferences</summary>
                   <div className="accordion-body">
+                    <button type="button" className="ghost" onClick={() => handleNav("settings")}>Open advanced settings</button>
                     <div className="ai-mode-row">
                       <span>AI Mode</span>
                       <div className="segmented-control" role="radiogroup" aria-label="AI mode">
@@ -1457,6 +1570,14 @@ export default function App() {
                         />
                       </label>
                     ) : null}
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.glutenFree}
+                        onChange={() => handleSettingsChange("glutenFree", !settings.glutenFree)}
+                      />
+                      Gluten-free meal planner
+                    </label>
                   </div>
                 </details>
                 <button type="submit" className="primary-button" disabled={isLoading || !isDataReady}>
